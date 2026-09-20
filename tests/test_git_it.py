@@ -648,6 +648,10 @@ class GitItTest(unittest.TestCase):
     def test_zsh_installed_completion_in_terminal(self):
         prefix = self.base / "zsh prefix"
         self.run_cmd(["bash", str(PROJECT / "install.sh"), "--prefix", str(prefix)])
+        insecure = self.base / "insecure completions"
+        insecure.mkdir()
+        (insecure / "_git-it").write_text("#compdef git-it\nreturn 1\n")
+        insecure.chmod(0o777)
         master, slave = pty.openpty()
         env = self.env.copy(); env["TERM"] = "xterm"
         proc = subprocess.Popen(["zsh", "-f", "-i"], cwd=self.base, env=env,
@@ -671,7 +675,10 @@ class GitItTest(unittest.TestCase):
 
         try:
             directory = shlex.quote(str(prefix / "share/zsh/site-functions"))
-            setup = (f"fpath=({directory} $fpath); autoload -Uz compinit; compinit -D; "
+            # CI images may have insecure system completion directories. Ignore
+            # those entries while retaining compinit's checks for our fixture.
+            setup = (f"fpath=({shlex.quote(str(insecure))} {directory} $fpath); "
+                     "autoload -Uz compinit; compinit -i -D; "
                      "bindkey '^I' complete-word; PS1='READY> '; print COMPLETION_READY\n")
             os.write(master, setup.encode())
             read_until(b"\r\nCOMPLETION_READY\r\n")

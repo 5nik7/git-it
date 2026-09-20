@@ -1,0 +1,27 @@
+name: Test
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install validation tools
+        run: sudo apt-get update && sudo apt-get install -y shellcheck zsh fish mandoc
+      - name: Bash syntax and ShellCheck
+        run: |
+          for file in git-it install.sh uninstall.sh maintenance.sh lib/*.bash; do bash -n "$file"; done
+          shellcheck -x git-it install.sh uninstall.sh maintenance.sh lib/*.bash
+      - name: Integration tests
+        run: python3 -m unittest discover -s tests -v
+      - name: Manual syntax
+        run: mandoc -Tlint git-it.1
+      - name: Benchmark evidence
+        run: python3 tests/benchmark.py --runs 20 > benchmark.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-benchmark
+          path: benchmark.json

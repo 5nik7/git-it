@@ -1,0 +1,9 @@
+# Merge manually; include ${custom.git_it} in your top-level format as desired.
+[custom.git_it]
+command = "git-it path --format '{icon} {parent_basename}/{path_outermost}/{cwd_prefix}' --no-newline --no-color"
+when = true
+require_repo = true
+shell = ["bash", "--noprofile", "--norc"]
+format = "[$output]($style) "
+style = "bold cyan"
+unsafe_no_escape = false

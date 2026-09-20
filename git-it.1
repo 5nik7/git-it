@@ -1,0 +1,164 @@
+.TH GIT-IT 1 "September 20, 2026" "git-it 0.1.0" "User Commands"
+.SH NAME
+git-it \- inspect, synchronize, and publish Git repository trees
+.SH SYNOPSIS
+.B git-it
+.RI [ options ] " [info|path|sync|publish]" " [options]"
+.SH DESCRIPTION
+A Bash 5+ command for Termux and Linux. Inspection is local. Recursive
+operations
+follow registered submodules. Completed work is retained after partial
+failure.
+.SH COMMANDS
+.TP
+.B info
+Show a local repository summary. This is the default command.
+.TP
+.B path
+Show the current root, or format verified repository ancestry.
+.TP
+.B sync
+Fetch and fast-forward the root upstream, then initialize and check out
+recorded
+submodule commits, parent before children. Safe siblings continue after
+blockers.
+.TP
+.B publish
+Preview, confirm, commit and push, children before parents. Defaults to staged
+changes and successfully published child pointers. Publication needs an owned
+destination and an attached, unambiguous upstream. Failed children block
+parents.
+.SH OPTIONS
+.TP
+.BI "-C " DIR
+Working directory.
+.TP
+.B -i, --icon
+Nerd Font host icon, independent of ownership. Empty output outside Git.
+.TP
+.BI "--remote " NAME
+Inspection remote. With sync, --remote takes no argument and advances children
+to explicitly configured branches instead of parent-recorded commits.
+.TP
+.BI "--get " FIELD
+Print one uncolored field.
+.TP
+.B --json
+Structured output without ANSI colors.
+.TP
+.BI "-f, --format " FORMAT
+Named {field} placeholders. Double braces produce literal braces. No
+evaluation.
+.TP
+.B --list-fields
+List fields without requiring a repository.
+.TP
+.B -n, --no-newline
+Suppress the final inspection newline.
+.TP
+.B --outermost
+Start operations at the outermost verified parent instead of the current repo.
+.TP
+.B --dry-run
+Local preview with no network or repository writes. Remote state is unknown.
+.TP
+.B --all
+Publish tracked and untracked changes, respecting ignore rules.
+.TP
+.BI "-m, --message " MESSAGE
+Commit message. Default: Sync via HOST on UTC TIMESTAMP.
+.TP
+.B --yes
+Accept publication preview. Required for noninteractive publication.
+.TP
+.BI "--config " FILE
+Read Git-config syntax from FILE instead of the XDG config location.
+.TP
+.B --no-config
+Ignore configuration.
+.TP
+.BI "--color " auto|always|never
+Color policy. Auto requires a terminal and an unset NO_COLOR variable.
+Each output stream is checked separately. Explicit always overrides NO_COLOR.
+Help, summary labels, operation statuses and diagnostics use color.
+JSON, single-field values, formatted output, version output and completion
+source remain uncolored.
+.TP
+.B --no-color
+Disable colors.
+.TP
+.BI "--completion " bash|zsh|fish
+Generate completion source without reading a repository.
+.TP
+.B -V, --version
+Print version.
+.TP
+.B -h, --help
+Print usage.
+Help does not load configuration; CLI color flags and NO_COLOR apply.
+.SH FIELDS
+root, remote, url, protocol, host, owner, repo, owned, icon, current, parent,
+outermost, parent_dirname, parent_basename, submodule_prefix,
+submodule_basename,
+cwd_prefix, path_parent, path_outermost, chain_length, chain_repos,
+chain_paths,
+is_submodule.
+.PP
+Paths are physical absolute paths unless explicitly relative. Chains are
+arrays
+in JSON and newline-separated field values. An ordinary repository has an
+empty
+parent, outermost equal to current, relative paths of a dot, and chain_length
+one.
+.SH CONFIGURATION
+.I ${XDG_CONFIG_HOME:-$HOME/.config}/git-it/config
+is read as data. Includes are disabled. CLI options override configuration.
+.PP
+.nf
+[git-it]
+    owner = github.com/5nik7
+    owner = gitlab.com/team/subgroup
+    hostAlias = github-work=github.com
+    color = auto
+.fi
+.PP
+Ownership is an exact host/namespace match, not authentication. No account is
+assumed when configuration is absent. Publishing checks the effective push
+URL.
+.SH INSTALLATION
+Run bash install.sh with an optional --prefix directory. The default is PREFIX
+on Termux, or HOME/.local otherwise. The installer includes the manual and
+completion files for all three shells under that prefix:
+.TP
+.B share/man/man1/git-it.1
+Manual page.
+.TP
+.B share/bash-completion/completions/git-it
+Bash completion, loaded through bash-completion or sourced directly.
+.TP
+.B share/zsh/site-functions/_git-it
+Zsh completion. Include this directory on fpath before running compinit.
+.TP
+.B share/fish/vendor_completions.d/git-it.fish
+Fish completion, loaded through the vendor completion path or sourced directly.
+.PP
+Custom prefixes may require completion search paths and MANPATH configuration.
+Shell startup files are not edited. Install and uninstall accept --dry-run,
+--color auto|always|never and --no-color. Auto mode honors NO_COLOR.
+Uninstall removes unchanged managed files and preserves modified files.
+.SH SAFETY
+No automatic stash, reset, clean, force-push, or branch selection. Pinned
+checkout
+may detach submodule HEAD. Hooks and signing configuration remain enabled.
+Existing submodule URL overrides are preserved. Changed topology can require
+manual Git work. git-it.lock directories guard overlapping git-it operations;
+inspect stale locks before manual removal. Ordinary Git does not honor these
+locks.
+.SH EXIT STATUS
+0: complete, preview, cancellation or empty prompt outside Git.
+1: failed/incomplete operation. 2: invalid arguments/configuration.
+3: dependency or repository-context error.
+.SH SEE ALSO
+.BR git (1),
+.BR git-submodule (1),
+.BR git-push (1)

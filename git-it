@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# git-it: repository tools. See LICENSE for the MIT license.
+if [ -z "${BASH_VERSION:-}" ]; then
+    printf '%s\n' 'git-it requires Bash 5 or newer.' >&2
+    exit 3
+fi
+if (( BASH_VERSINFO[0] < 5 )); then
+    printf '%s\n' 'git-it requires Bash 5 or newer.' >&2
+    exit 3
+fi
+set -u
+set -o pipefail
+export GIT_OPTIONAL_LOCKS=0
+readonly VERSION='0.1.0'
+# Installers place modules beside this launcher in ../lib/git-it.
+ENTRY=${BASH_SOURCE[0]}
+[[ $ENTRY == */* ]] || ENTRY=./$ENTRY
+BASE=$(cd -- "${ENTRY%/*}" && pwd -P) || exit 3
+if [[ -f $BASE/lib/core.bash ]]; then
+    LIB=$BASE/lib
+else
+    LIB=$BASE/../lib/git-it
+fi
+# shellcheck source=lib/core.bash
+source "$LIB/core.bash" || exit 3
+main "$@"

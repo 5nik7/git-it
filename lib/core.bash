@@ -195,11 +195,17 @@ main() {
     fi
     ((selector <= 1)) || die 2 'choose only one output selector'
     if [[ $CMD != sync && $CMD != publish ]]; then
-        ((OUTERMOST + DRY_RUN + ALL + YES == 0)) && [[ -z $MESSAGE ]] || die 2 'operation options require sync or publish'
+        if ((OUTERMOST + DRY_RUN + ALL + YES != 0)) || [[ -n $MESSAGE ]]; then
+            die 2 'operation options require sync or publish'
+        fi
     else
-        ((ICON + FORMAT_SET + LIST_FIELDS == 0)) && [[ -z $GET && -z $REMOTE_ARG ]] || die 2 'inspection options cannot be used with operations'
+        if ((ICON + FORMAT_SET + LIST_FIELDS != 0)) || [[ -n $GET || -n $REMOTE_ARG ]]; then
+            die 2 'inspection options cannot be used with operations'
+        fi
         if [[ $CMD == sync ]]; then
-            ((ALL + YES == 0)) && [[ -z $MESSAGE ]] || die 2 'publish options require publish'
+            if ((ALL + YES != 0)) || [[ -n $MESSAGE ]]; then
+                die 2 'publish options require publish'
+            fi
         fi
     fi
     command -v git >/dev/null 2>&1 || die 3 'Git is required'

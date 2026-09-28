@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import pty
+import re
 import select
 import shlex
 import shutil
@@ -539,6 +540,100 @@ class GitItTest(unittest.TestCase):
         self.assertNotIn("\x1b[", self.cli(repo, "--color", "always", "--json").stdout)
         self.assertNotIn("\x1b[", self.cli(repo).stdout)
 
+    def test_operation_spinner_terminal_modes_and_cleanup(self):
+        _, _, repo = self.remote_repo("spinner")
+        wrappers = self.base / "spinner-wrappers"
+        wrappers.mkdir()
+        shim = wrappers / "git"
+        shim.write_text("#!" + shutil.which("bash") + "\n"
+                        'for arg in "$@"; do\n'
+                        '  if [[ $arg == fetch ]]; then\n'
+                        '    sleep 0.7\n'
+                        '    [[ ${TEST_FETCH_FAIL:-0} == 0 ]] || exit 1\n'
+                        '    break\n'
+                        '  fi\n'
+                        'done\nexec "$REAL_GIT" "$@"\n')
+        shim.chmod(0o700)
+        env = self.env.copy()
+        env.pop("NO_COLOR", None)
+        env.update(PATH=str(wrappers) + os.pathsep + env["PATH"],
+                   REAL_GIT=shutil.which("git"), TERM="xterm")
+
+        def terminal_run(args, overrides=None, interrupt=None, stderr_tty=True):
+            run_env = env.copy()
+            run_env.update(overrides or {})
+            master, slave = pty.openpty()
+            proc = subprocess.Popen(["bash", str(CLI), "--no-config", "-C", str(repo),
+                                     "sync", *args], env=run_env, stdin=subprocess.DEVNULL,
+                                    stdout=slave, stderr=slave if stderr_tty else subprocess.PIPE,
+                                    start_new_session=True)
+            os.close(slave)
+            captured = b""
+            sent_signal = False
+            try:
+                deadline = time.monotonic() + 15
+                while time.monotonic() < deadline:
+                    if select.select([master], [], [], 0.1)[0]:
+                        try:
+                            chunk = os.read(master, 4096)
+                        except OSError:
+                            break
+                        if not chunk:
+                            break
+                        captured += chunk
+                        if interrupt and b"Fetching" in captured and not sent_signal:
+                            os.killpg(proc.pid, interrupt)
+                            sent_signal = True
+                else:
+                    self.fail("spinner left the terminal open after the operation")
+                proc.communicate(timeout=5)
+                if interrupt:
+                    self.assertTrue(sent_signal)
+                    self.assertEqual(proc.returncode, 128 + interrupt)
+                return proc.returncode, captured
+            finally:
+                if proc.poll() is None:
+                    os.killpg(proc.pid, signal.SIGKILL); proc.communicate()
+                os.close(master)
+
+        for args, overrides, animated, colored in (
+            ((), {}, True, True),
+            (("-v",), {}, True, True),
+            (("--no-color",), {}, True, False),
+            ((), {"NO_COLOR": "1"}, True, False),
+            (("--color=always",), {"NO_COLOR": "1"}, True, True),
+            (("--no-progress",), {}, False, True),
+            (("--json", "--color=always"), {}, False, False),
+            (("--dry-run",), {}, False, True),
+            ((), {"TERM": "dumb"}, False, True),
+        ):
+            with self.subTest(args=args, overrides=overrides):
+                code, output = terminal_run(args, overrides)
+                self.assertEqual(code, 0, output)
+                self.assertEqual(b"Fetching" in output, animated)
+                self.assertEqual(b"\x1b[" in output, colored)
+                if animated:
+                    plain = re.sub(rb"\x1b\[[0-9;]*m", b"", output)
+                    frames = re.findall(rb"\r  ([|/\\-]) Fetching", plain)
+                    self.assertGreaterEqual(len(set(frames)), 2, output)
+                    self.assertIn(b"\r            \r  unchanged", plain)
+                if "--json" in args:
+                    self.assertTrue(json.loads(output)["complete"])
+                self.assertFalse((repo / ".git/git-it.lock").exists())
+        code, failed = terminal_run((), {"TEST_FETCH_FAIL": "1"})
+        self.assertEqual(code, 1)
+        self.assertIn(b"Fetching", failed)
+        self.assertIn(b"failed", failed)
+        self.assertIn(b"Incomplete", failed)
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            _, interrupted = terminal_run((), interrupt=sig)
+            self.assertIn(b"\r            \r", interrupted)
+            self.assertFalse((repo / ".git/git-it.lock").exists())
+        self.assertNotIn(b"Fetching", terminal_run((), stderr_tty=False)[1])
+        piped = self.cli(repo, "sync", "--color=always", env=env).stdout
+        self.assertNotIn("Fetching", piped)
+        self.assertNotIn("\r", piped)
+
     def test_compact_and_verbose_inspection(self):
         repo = self.repo("pretty space\nrepo")
         self.git(repo, "remote", "add", "origin", "https://user:SECRET@github.com/5nik7/remote-name.git?token=PRIVATE")
@@ -752,7 +847,7 @@ class GitItTest(unittest.TestCase):
                     self.run_cmd([shell, "-n", str(installed)])
         bash_completion = str(prefix / destinations["bash"])
         for word, expected in (("--col", "--color"), ("-h", "-h"), ("-V", "-V"), ("-m", "-m"),
-                               ("--verb", "--verbose"), ("-v", "-v")):
+                               ("--verb", "--verbose"), ("-v", "-v"), ("--no-prog", "--no-progress")):
             result = self.run_cmd(["bash", "-c", 'source "$1"; COMP_WORDS=(git-it "$2"); '
                                    'COMP_CWORD=1; _git_it; printf "%s\\n" "${COMPREPLY[@]}"',
                                    "completion-test", bash_completion, word])
@@ -764,7 +859,7 @@ class GitItTest(unittest.TestCase):
         if shutil.which("fish"):
             for query, expected in (("git-it --col", "--color"), ("git-it -", "-h"),
                                     ("git-it --color a", "always"), ("git-it --verb", "--verbose"),
-                                    ("git-it -", "-v")):
+                                    ("git-it -", "-v"), ("git-it --no-prog", "--no-progress")):
                 result = self.run_cmd(["fish", "--no-config", "-c",
                                        'source $argv[1]; complete -C $argv[2]',
                                        str(prefix / destinations["fish"]), query])
@@ -815,6 +910,8 @@ class GitItTest(unittest.TestCase):
             read_until(b"--color")
             os.write(master, b"\x15git-it --verb\t")
             read_until(b"--verbose")
+            os.write(master, b"\x15git-it --no-prog\t")
+            read_until(b"--no-progress")
             os.write(master, b"\x15exit\n")
             proc.wait(timeout=5)
             self.assertEqual(proc.returncode, 0)

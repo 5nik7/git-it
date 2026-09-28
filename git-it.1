@@ -94,6 +94,9 @@ Repeated flags have no additional effect. JSON, bare path output, field values,
 prompt formats, icons, field lists, version output and completion source are
 unchanged. There is no verbosity configuration key.
 .TP
+.B --no-progress
+Disable the terminal activity spinner for sync and publish.
+.TP
 .BI "--completion " bash|zsh|fish
 Generate completion source without reading a repository.
 .TP
@@ -117,6 +120,15 @@ completion, incomplete work, previews, and cancellation.
 .PP
 Inspection describes ownership as a configured owner match, not proof of access.
 Absent metadata is displayed as Not configured.
+.PP
+Sync and publish show a delayed, colored spinner during Git fetch,
+initialization, update, checkout, commit and push steps. It indicates activity,
+not a completion percentage, and clears before results are printed.
+Both stdout and stderr must be terminals; TERM must be set and not dumb.
+JSON, dry runs and redirected output stay static even with --color always.
+The spinner also works in verbose mode. Color controls apply as usual;
+--no-color and NO_COLOR leave plain frames. Use --no-progress to disable
+animation, including for helpers that draw their own terminal interface.
 .SH FIELDS
 root, remote, url, protocol, host, owner, repo, owned, icon, current, parent,
 outermost, parent_dirname, parent_basename, submodule_prefix,

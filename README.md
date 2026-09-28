@@ -173,6 +173,23 @@ key. Repeating `-v` or `--verbose` has no additional effect; `-V` remains versio
 Verbose does not change JSON, bare paths, field values, prompt formats, icons,
 field lists, version output, or generated completion source.
 
+During `sync` and `publish`, a colored spinner identifies the active Git step:
+fetching, initializing, updating, checking out, committing, or pushing. It appears
+after a short delay and clears before the result is printed. This indicates
+activity, not a percentage or estimated completion time.
+
+Animation requires both stdout and stderr to be terminals and a nonempty `TERM`
+other than `dumb`. It works with default and verbose output. JSON, dry runs,
+and redirected output retain static output, even with `--color always`.
+`--no-color` and `NO_COLOR` keep the spinner plain; the usual explicit color
+override still applies. Use `--no-progress` to disable animation, including when
+credential helpers or signing tools need to draw their own terminal interface:
+
+```bash
+git-it sync --no-progress
+git-it publish --verbose --no-progress
+```
+
 The installer and uninstaller also accept `--color auto|always|never` and
 `--no-color`, honor `NO_COLOR` in auto mode, and keep redirected output plain.
 Their default output shows the prefix and result. Add `-v` or `--verbose` for

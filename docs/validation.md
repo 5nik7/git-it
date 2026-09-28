@@ -88,6 +88,23 @@ external push was performed. Linux CI and timing benchmarks were not rerun;
 the historical timing evidence below is unchanged. Inspection/prompt code paths
 add no Git calls or worktree scans.
 
+## Terminal activity spinner — September 28, 2026
+
+The final native Termux run passed **48 tests in 105.135 seconds**, with no
+skips. Bash syntax, ShellCheck, mandoc lint, completion checks for Bash/Zsh/Fish,
+and edited-file whitespace checks passed.
+
+A delayed-fetch wrapper around local fixture Git operations exercises multiple
+spinner frames in real PTYs. Coverage includes default/verbose output, color
+overrides, NO_COLOR, plain frames, --no-progress, JSON, dry runs, TERM=dumb,
+redirected streams, injected fetch failure, and SIGINT/SIGTERM cleanup. Animation
+clears before results; interrupted operations release their owned locks. Existing
+publication, cancellation, preservation, and rollback tests also pass.
+
+All operation mutations used disposable local fixtures. No live installation,
+project commit, or external push was performed. Linux CI and benchmarks were not
+rerun; live credential/signing interfaces were not exercised.
+
 ## Prompt timing
 
 Thirty sequential warm invocations per scenario, preceded by three warmups, in

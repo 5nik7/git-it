@@ -121,6 +121,7 @@ Global options:
   --no-config             Ignore user configuration
   --color auto|always|never, --no-color
   -v, --verbose           Show full paths and additional explanations
+  --no-progress           Disable the terminal operation spinner
   -h, --help              Show this help without requiring Git
   -V, --version           Show version
   --completion SHELL      Generate bash, zsh, or fish completion
@@ -188,7 +189,7 @@ main() {
     local arg command_set=0 selector=0 show_help=0 show_version=0 completion_shell=''
     CMD=info TARGET=. COLOR=auto COLOR_SET=0 CONFIG=${XDG_CONFIG_HOME:-$HOME/.config}/git-it/config
     NO_CONFIG=0 EXPLICIT_CONFIG=0 REMOTE_ARG='' FORMAT='' FORMAT_SET=0 GET='' JSON=0 ICON=0 NEWLINE=1
-    OUTERMOST=0 DRY_RUN=0 ADVANCE=0 ALL=0 YES=0 MESSAGE='' LIST_FIELDS=0 VERBOSE=0
+    OUTERMOST=0 DRY_RUN=0 ADVANCE=0 ALL=0 YES=0 MESSAGE='' LIST_FIELDS=0 VERBOSE=0 NO_PROGRESS=0
     while (($#)); do
         arg=$1; shift
         case $arg in
@@ -216,6 +217,7 @@ main() {
             --no-config) NO_CONFIG=1 ;;
             --no-color) COLOR=never; COLOR_SET=1 ;;
             -v|--verbose) VERBOSE=1 ;;
+            --no-progress) NO_PROGRESS=1 ;;
             -i|--icon) ICON=1; ((selector+=1)) ;;
             --json) JSON=1; ((selector+=1)) ;;
             -n|--no-newline) NEWLINE=0 ;;

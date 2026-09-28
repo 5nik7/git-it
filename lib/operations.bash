@@ -1,5 +1,46 @@
 # Ordered, incremental operations. Every failure is an explicit subtree result.
 # shellcheck disable=SC2034
+
+# Animate separately so Git stays in the foreground with its original stdin.
+# Only quiet commands belong here; events and confirmation prompts render after
+# the animation is stopped. No cursor hiding or terminal mode changes are used.
+progress_run() {
+    local label=$1 rc owner=$BASHPID
+    shift
+    if (( !JSON && !DRY_RUN && !NO_PROGRESS )) && [[ -t 1 && -t 2 && ${TERM:-dumb} != dumb ]]; then
+        display "$label"; label=$REPLY
+        PROGRESS_WIDTH=$((${#label} + 4))
+        (
+            trap - EXIT INT TERM
+            local sleeper='' frame=0
+            local -a frames=('|' '/' '-' $'\\') tints=('')
+            if color_enabled 1; then tints=("$CYAN" $'\e[34m' $'\e[35m' "$GREEN"); fi
+            trap 'if [[ -n $sleeper ]]; then kill "$sleeper" 2>/dev/null || :; wait "$sleeper" 2>/dev/null || :; fi; exit 0' TERM
+            while :; do
+                # Delay the first frame to avoid flashing for quick commands.
+                sleep 0.15 & sleeper=$!
+                wait "$sleeper" || exit 0
+                sleeper=''
+                kill -0 "$owner" 2>/dev/null || exit 0
+                printf '\r  %s%s%s %s' "${tints[frame % ${#tints[@]}]}" "${frames[frame % 4]}" "$RESET" "$label"
+                ((frame+=1))
+            done
+        ) </dev/null &
+        PROGRESS_PID=$!
+    fi
+    "$@" >/dev/null 2>&1; rc=$?
+    progress_stop
+    return "$rc"
+}
+
+progress_stop() {
+    [[ -n ${PROGRESS_PID:-} ]] || return 0
+    kill "$PROGRESS_PID" 2>/dev/null || :
+    wait "$PROGRESS_PID" 2>/dev/null || :
+    PROGRESS_PID=''
+    printf '\r%*s\r' "$PROGRESS_WIDTH" ''
+}
+
 event() {
     local dir=$1 state=$2 reason=$3 shown=$1 detail
     # Optional display lines replace the human reason, never the JSON detail.
@@ -45,6 +86,7 @@ operations_heading() {
 
 cleanup_locks() {
     local dir
+    progress_stop
     for dir in "${LOCKS[@]}"; do rmdir -- "$dir" 2>/dev/null || :; done
 }
 
@@ -137,8 +179,8 @@ upstream() {
 }
 
 fetch_branch() {
-    git -C "$1" -c fetch.recurseSubmodules=false fetch --quiet --no-tags --no-recurse-submodules \
-        --refmap= -- "$2" "$3:$4" >/dev/null 2>&1
+    progress_run Fetching git -C "$1" -c fetch.recurseSubmodules=false fetch --quiet --no-tags --no-recurse-submodules \
+        --refmap= -- "$2" "$3:$4"
 }
 
 remote_contains() {
@@ -179,7 +221,7 @@ sync_children() {
             if [[ -d $child ]] && [[ -n $(find "$child" -mindepth 1 -maxdepth 1 -print -quit) ]]; then
                 event "$child" blocked 'uninitialized submodule directory is not empty'; continue
             fi
-            if ! git --literal-pathspecs -C "$dir" -c submodule.recurse=false submodule update --init --checkout -- "$path" >/dev/null 2>&1; then
+            if ! progress_run Initializing git --literal-pathspecs -C "$dir" -c submodule.recurse=false submodule update --init --checkout -- "$path"; then
                 event "$child" failed 'initialization failed; check URL, credentials, and Git transport policy'; continue
             fi
         fi
@@ -224,7 +266,7 @@ sync_node() {
         target=$pinned
         if ! git -C "$dir" cat-file -e "$target^{commit}" 2>/dev/null; then
             select_remote "$dir" || return 1; remote=${REMOTE:-origin}
-            if ! git -C "$dir" fetch --quiet --no-tags --no-recurse-submodules -- "$remote" "$target" >/dev/null 2>&1; then
+            if ! progress_run Fetching git -C "$dir" fetch --quiet --no-tags --no-recurse-submodules -- "$remote" "$target"; then
                 event "$dir" failed 'recorded commit could not be fetched'; return 1
             fi
         fi
@@ -240,14 +282,14 @@ sync_node() {
             event "$dir" blocked 'local and upstream histories diverged'; return 1
         elif ! safe_topology "$dir" "$target"; then
             event "$dir" blocked 'submodule removal, replacement, or occupied new path needs manual review'; return 1
-        elif ! git -C "$dir" -c submodule.recurse=false merge --ff-only --no-edit --no-overwrite-ignore "$target" >/dev/null 2>&1; then
+        elif ! progress_run Updating git -C "$dir" -c submodule.recurse=false merge --ff-only --no-edit --no-overwrite-ignore "$target"; then
             event "$dir" failed 'fast-forward failed; local work was not reset'; return 1
         else event "$dir" updated 'fast-forwarded upstream'; fi
     elif [[ $before == "$target" ]]; then event "$dir" unchanged 'at selected submodule commit'
     else
         if ! remote_contains "$dir" "$before"; then event "$dir" blocked 'refusing to leave a submodule commit without remote reachability evidence'; return 1; fi
         if ! safe_topology "$dir" "$target"; then event "$dir" blocked 'submodule topology change needs manual review'; return 1; fi
-        if ! git -C "$dir" -c submodule.recurse=false checkout --quiet --detach --no-overwrite-ignore "$target" -- >/dev/null 2>&1; then
+        if ! progress_run 'Checking out' git -C "$dir" -c submodule.recurse=false checkout --quiet --detach --no-overwrite-ignore "$target" --; then
             event "$dir" failed 'submodule checkout failed; local work was not reset'; return 1
         else event "$dir" updated 'checked out selected commit; parent pointer is not staged'; fi
     fi
@@ -399,11 +441,11 @@ publish_node() {
         git -C "$dir" add --all -- . >/dev/null 2>&1 || { event "$dir" failed 'staging failed; inspect index'; return 1; }
     fi
     if ! git -C "$dir" diff --cached --quiet --ignore-submodules=none --; then
-        if ! git -C "$dir" commit -m "$MESSAGE" >/dev/null 2>&1; then
+        if ! progress_run Committing git -C "$dir" commit -m "$MESSAGE"; then
             event "$dir" failed 'commit failed; staged changes retained (check identity and hooks)'; return 1
         fi
     fi
-    if ! git -C "$dir" -c push.followTags=false push --porcelain --recurse-submodules=check -- "$destination" "HEAD:$ref" >/dev/null 2>&1; then
+    if ! progress_run Pushing git -C "$dir" -c push.followTags=false push --porcelain --recurse-submodules=check -- "$destination" "HEAD:$ref"; then
         event "$dir" failed 'push failed; local commit retained and parent publication blocked'; return 1
     fi
     event "$dir" published 'selected changes and ahead commits pushed'
@@ -436,6 +478,7 @@ publish_node() {
 operations_main() {
     EVENT_DIRS=(); EVENT_STATES=(); EVENT_REASONS=(); LOCKS=(); PUB_DIRS=(); RESULT=0; PUBLISH_CANDIDATES=0
     CANCELLED=0 LAST_EVENT_DIR='' OP_PHASE=execution
+    PROGRESS_PID='' PROGRESS_WIDTH=0
     if ((DRY_RUN)) || [[ $CMD == publish ]]; then OP_PHASE=preview; fi
     declare -gA HELD=() VISITED=() BLOCKED=() SNAPSHOTS=() PARENT=() EXPECTED=()
     declare -gA PREVIEW_DEST=() PREVIEW_REF=() PREVIEW_REMOTE=() PREVIEW_BRANCH=()

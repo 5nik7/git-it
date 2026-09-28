@@ -4,8 +4,7 @@
 # shellcheck source=lib/core.bash
 source "$SOURCE_DIR/lib/core.bash"
 maintenance_fail() {
-    colors; display "$*"
-    printf '%sgit-it maintenance:%s %s\n' "$ERR_RED" "$ERR_RESET" "$REPLY" >&2
+    colors; ui_error 'git-it maintenance' "$*"
     exit 1
 }
 checksum() { local line; line=$(sha256sum < "$1") || return 1; DIGEST=${line%% *}; }
@@ -15,9 +14,9 @@ maintenance_cleanup() {
         for ((i=${#MAINT_CHANGED[@]}-1;i>=0;i--)); do
             dest=${MAINT_CHANGED[i]}
             if [[ -f $INSTALL_STAGE/backup-$i ]]; then
-                cp -p -- "$INSTALL_STAGE/backup-$i" "$dest" || printf 'Could not restore %s\n' "$dest" >&2
+                cp -p -- "$INSTALL_STAGE/backup-$i" "$dest" || ui_error 'git-it maintenance' "Could not restore $dest"
             else
-                rm -f -- "$dest" || printf 'Could not remove partial file %s\n' "$dest" >&2
+                rm -f -- "$dest" || ui_error 'git-it maintenance' "Could not remove partial file $dest"
             fi
         done
     fi
@@ -47,7 +46,7 @@ maintenance_safe_path() {
 maintenance_main() {
     local action=$1; shift
     local dry=0 arg rel hash extra manifest temp='' interpreter mode i result=0 show_help=0
-    COLOR=auto JSON=0
+    COLOR=auto JSON=0 VERBOSE=0
     INSTALL_PREFIX=${PREFIX:-$HOME/.local}
     while (($#)); do
         arg=$1; shift
@@ -58,6 +57,7 @@ maintenance_main() {
             --color=*) COLOR=${arg#*=} ;;
             --color) (($#)) || maintenance_fail '--color requires a policy'; COLOR=$1; shift ;;
             --no-color) COLOR=never ;;
+            -v|--verbose) VERBOSE=1 ;;
             -h|--help) show_help=1 ;;
             -V|--version) bash "$SOURCE_DIR/git-it" --version; return $? ;;
             *) maintenance_fail "unknown argument: $arg" ;;
@@ -66,13 +66,22 @@ maintenance_main() {
     case $COLOR in auto|always|never) ;; *) maintenance_fail 'color must be auto, always, or never' ;; esac
     colors
     if ((show_help)); then
+        ui_heading "git-it $action"
+        printf '\n'
         printf '%sUsage:%s bash %s.sh [--prefix DIR] [--dry-run]\n' "$CYAN" "$RESET" "$action"
-        printf '       [--color auto|always|never] [--no-color]\n'
+        printf '       [--color auto|always|never] [--no-color] [-v|--verbose]\n\n'
+        ui_field '--verbose' 'Show each managed file action'
+        ui_field '--dry-run' 'List intended actions without changing the prefix'
         return 0
     fi
     [[ -n $INSTALL_PREFIX ]] || maintenance_fail 'empty prefix'
     INSTALL_PREFIX=$(realpath -m -- "$INSTALL_PREFIX") || maintenance_fail 'cannot resolve prefix'
     [[ $INSTALL_PREFIX != / ]] || maintenance_fail 'refusing filesystem root as prefix'
+    if [[ $action == install ]]; then ui_heading Install
+    else ui_heading Remove; fi
+    ui_field Prefix "$INSTALL_PREFIX"
+    if ((dry)); then ui_field Preview 'No installation files will change'; fi
+    printf '\n'
     local -a paths=(bin/git-it lib/git-it/core.bash lib/git-it/inspect.bash lib/git-it/operations.bash lib/git-it/completion.bash share/man/man1/git-it.1 share/bash-completion/completions/git-it share/zsh/site-functions/_git-it share/fish/vendor_completions.d/git-it.fish)
     local -A allowed=() previous=()
     for rel in "${paths[@]}"; do allowed[$rel]=1; done
@@ -91,7 +100,7 @@ maintenance_main() {
             checksum "$INSTALL_PREFIX/$rel" || maintenance_fail "cannot hash $rel"
             if [[ $DIGEST != "${previous[$rel]}" ]]; then
                 if [[ $action == install ]]; then maintenance_fail "locally modified file preserved: $rel"
-                else printf '%sPreserve modified%s %s\n' "$YELLOW" "$RESET" "$rel"; result=1; fi
+                else ui_status 'Preserve modified' "$rel"; result=1; fi
             fi
         fi
     done
@@ -109,12 +118,17 @@ maintenance_main() {
             [[ -v previous[$rel] && -f $INSTALL_PREFIX/$rel ]] || continue
             checksum "$INSTALL_PREFIX/$rel" || maintenance_fail "cannot hash $rel"
             if [[ $DIGEST != "${previous[$rel]}" ]]; then result=1; continue; fi
-            printf '%sRemove%s %s\n' "$CYAN" "$RESET" "$rel"
+            if ((VERBOSE || dry)); then ui_status Remove "$rel"; fi
             ((dry)) || rm -- "$INSTALL_PREFIX/$rel" || maintenance_fail "cannot remove $rel"
         done
         if ((!dry && result == 0)) && [[ -f $manifest ]]; then rm -- "$manifest" || return 1; fi
         [[ -z $MAINT_LOCK ]] || rmdir -- "$MAINT_LOCK" || return 1
         trap - EXIT INT TERM
+        if ((result)); then
+            if ((dry)); then ui_summary 'Preview incomplete' "$YELLOW" 'Modified files would be preserved.'
+            else ui_summary 'Removal incomplete' "$YELLOW" 'Modified files and the manifest were preserved.'; fi
+        elif ((dry)); then ui_summary 'Preview complete' "$CYAN" 'No installation files were changed.'
+        else ui_summary 'Removal complete' "$GREEN"; fi
         return "$result"
     fi
     temp=$(mktemp -d) || maintenance_fail 'cannot create staging directory'
@@ -154,7 +168,8 @@ maintenance_main() {
         done
     fi
     for ((i=0;i<${#paths[@]};i++)); do
-        rel=${paths[i]}; printf '%sInstall%s %s\n' "$GREEN" "$RESET" "$rel"
+        rel=${paths[i]}
+        if ((VERBOSE || dry)); then ui_status Install "$rel"; fi
         if ((!dry)); then
             mode=644; [[ $rel != bin/git-it ]] || mode=755
             maintenance_write "$temp/$i" "$INSTALL_PREFIX/$rel" "$mode" || maintenance_fail "install failed at $rel (restoring prior files)"
@@ -162,4 +177,6 @@ maintenance_main() {
     done
     if ((!dry)); then maintenance_write "$temp/manifest" "$manifest" 644 || maintenance_fail 'cannot install manifest'; fi
     MAINT_FINISHED=1; maintenance_cleanup; trap - EXIT INT TERM
+    if ((dry)); then ui_summary 'Preview complete' "$CYAN" 'No installation files were changed.'
+    else ui_summary 'Installation complete' "$GREEN"; fi
 }

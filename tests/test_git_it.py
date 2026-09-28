@@ -331,35 +331,44 @@ class GitItTest(unittest.TestCase):
         self.assertEqual(self.git(repo, "show-ref"), before)
         self.assertEqual(self.cli(repo, "publish", ok=False).returncode, 2)
 
-    def test_publish_json_confirmation_shows_preview_and_cancel_preserves(self):
+    def test_publish_confirmation_shows_preview_and_cancel_preserves(self):
         _, bare, repo = self.remote_repo("cancel")
         self.owned_remote(repo, bare)
         (repo / "selected-file").write_text("selected\n"); self.git(repo, "add", "selected-file")
         before = self.git(repo, "rev-parse", "HEAD")
-        master, slave = pty.openpty()
-        try:
-            proc = subprocess.Popen(["bash", str(CLI), "--config", str(self.config), "-C", str(repo),
-                                     "publish", "--json"], env=self.env, stdin=slave,
-                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            self.addCleanup(lambda: proc.poll() is not None or proc.kill())
-            preview = b""
-            deadline = time.monotonic() + 20
-            while b"[y/N]" not in preview and time.monotonic() < deadline:
-                if select.select([proc.stderr], [], [], 0.1)[0]:
-                    chunk = os.read(proc.stderr.fileno(), 4096)
-                    if not chunk:
-                        break
-                    preview += chunk
-            self.assertIn(b"selected-file", preview)
-            self.assertIn(b"[y/N]", preview)
-            os.write(master, b"n\n")
-            stdout, stderr = proc.communicate(timeout=10)
-            self.assertEqual(proc.returncode, 0, preview + stderr)
-            self.assertTrue(any(e["status"] == "cancelled" for e in json.loads(stdout)["events"]))
-            self.assertEqual(self.git(repo, "rev-parse", "HEAD"), before)
-            self.assertFalse((repo / ".git/git-it.lock").exists())
-        finally:
-            os.close(master); os.close(slave)
+        for flags in (("--json",), (), ("--verbose",)):
+            with self.subTest(flags=flags):
+                master, slave = pty.openpty()
+                proc = subprocess.Popen(["bash", str(CLI), "--config", str(self.config), "-C", str(repo),
+                                         "publish", *flags], env=self.env, stdin=slave,
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                try:
+                    preview = b""
+                    deadline = time.monotonic() + 20
+                    while b"[y/N]" not in preview and time.monotonic() < deadline:
+                        if select.select([proc.stderr], [], [], 0.1)[0]:
+                            chunk = os.read(proc.stderr.fileno(), 4096)
+                            if not chunk:
+                                break
+                            preview += chunk
+                    self.assertIn(b"[y/N]", preview)
+                    os.write(master, b"n\n")
+                    stdout, stderr = proc.communicate(timeout=10)
+                    self.assertEqual(proc.returncode, 0, preview + stderr)
+                    if "--json" in flags:
+                        self.assertIn(b"selected-file", preview)
+                        self.assertTrue(any(e["status"] == "cancelled" for e in json.loads(stdout)["events"]))
+                    else:
+                        self.assertIn(b"selected-file", stdout)
+                        self.assertIn(b"Cancelled\n", stdout)
+                        self.assertNotIn(b"Complete\n", stdout)
+                        self.assertNotIn(b"Publishing\n", stdout)
+                    self.assertEqual(self.git(repo, "rev-parse", "HEAD"), before)
+                    self.assertFalse((repo / ".git/git-it.lock").exists())
+                finally:
+                    if proc.poll() is None:
+                        proc.kill(); proc.communicate()
+                    os.close(master); os.close(slave)
 
     def test_sync_interruption_releases_owned_lock(self):
         _, _, repo = self.remote_repo("interrupt")
@@ -530,6 +539,124 @@ class GitItTest(unittest.TestCase):
         self.assertNotIn("\x1b[", self.cli(repo, "--color", "always", "--json").stdout)
         self.assertNotIn("\x1b[", self.cli(repo).stdout)
 
+    def test_compact_and_verbose_inspection(self):
+        repo = self.repo("pretty space\nrepo")
+        self.git(repo, "remote", "add", "origin", "https://user:SECRET@github.com/5nik7/remote-name.git?token=PRIVATE")
+        plain = self.cli(repo, "--no-color").stdout
+        verbose = self.cli(repo, "--no-color", "--verbose").stdout
+        self.assertIn(r"Repository pretty space\x0arepo", plain)
+        self.assertIn("Matches configured owner", plain)
+        self.assertNotIn("Remote details", plain)
+        self.assertIn("https://github.com/5nik7/remote-name.git", verbose)
+        self.assertIn("Verified ancestry", verbose)
+        for output in (plain, verbose):
+            self.assertNotIn("SECRET", output)
+            self.assertNotIn("PRIVATE", output)
+            self.assertNotIn("\x1b", output)
+        self.assertEqual(verbose, self.cli(repo, "-v", "--verbose", "--no-color").stdout)
+        self.git(repo, "remote", "remove", "origin")
+        self.assertIn("Not configured", self.cli(repo).stdout)
+        self.assertIn("No configured owner match", self.cli(repo).stdout)
+        self.assertIn("--verbose", self.cli(self.base, "--help").stdout)
+        self.assertEqual(self.cli(self.base, "-v", "-V").stdout,
+                         self.cli(self.base, "--version").stdout)
+        self.assertEqual(self.cli(repo, "-vv", ok=False).returncode, 2)
+
+    def test_verbose_preserves_exact_outputs(self):
+        repo = self.repo("exact space\nrepo")
+        selectors = (("path",), ("path", "-n"), ("--json",), ("path", "--json"),
+                     ("--get", "root"), ("--get", "chain_repos", "-n"),
+                     ("--format", "{root}", "-n"), ("-i", "-n"), ("--list-fields",),
+                     ("--version",), *(("--completion", shell) for shell in ("bash", "zsh", "fish")),
+                     ("sync", "--dry-run", "--json"),
+                     ("publish", "--dry-run", "--json", "-m", "fixed message"))
+        for args in selectors:
+            with self.subTest(args=args):
+                plain = self.cli(repo, "--color=always", *args, ok=False)
+                verbose = self.cli(repo, "-v", "--color=always", *args, ok=False)
+                self.assertEqual((plain.returncode, plain.stdout, plain.stderr),
+                                 (verbose.returncode, verbose.stdout, verbose.stderr))
+                self.assertNotIn("\x1b[", verbose.stdout)
+
+    def test_compact_sync_details_paths_and_partial_completion(self):
+        _, _, top, _, _, _, _ = self.make_sync_tree()
+        self.cli(top, "sync")
+        plain = self.cli(top, "sync").stdout
+        verbose = self.cli(top, "sync", "-v").stdout
+        self.assertRegex(plain, r"unchanged\s+middle/leaf\n")
+        self.assertNotIn(str(top / "middle"), plain)
+        self.assertNotIn("at selected submodule commit", plain)
+        self.assertIn(str(top / "middle/leaf"), verbose)
+        self.assertIn("at selected submodule commit", verbose)
+        self.assertTrue(plain.endswith("Complete\n"))
+        (top / "middle/file").write_text("local edit\n")
+        for flags in ((), ("-v",)):
+            result = self.cli(top, "sync", *flags, ok=False)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("local edits, staged changes, untracked files", result.stdout)
+            self.assertIn("sibling", result.stdout)
+            self.assertIn("Incomplete\n", result.stdout)
+            self.assertIn("Completed work is retained", result.stdout)
+        preview = self.cli(top, "sync", "--dry-run", ok=False).stdout
+        self.assertIn("Preview incomplete", preview)
+        self.assertIn("remote state not checked", preview)
+        self.assertIn("Remote state and undiscovered descendants were not checked", preview)
+
+    def test_publish_human_preview_and_execution(self):
+        _, bare, repo = self.remote_repo("pretty-publish")
+        self.owned_remote(repo, bare)
+        filename = "selected space\tline\nend"
+        (repo / filename).write_text("selected\n")
+        self.git(repo, "add", filename)
+        for flags in ((), ("--verbose",)):
+            preview = self.cli(repo, "publish", "--dry-run", "-m", "review this", *flags).stdout
+            self.assertIn("Preview\n", preview)
+            self.assertIn("Staged changes", preview)
+            self.assertIn("Branch   main\n", preview)
+            self.assertIn("Push to  ssh://example.invalid", preview)
+            self.assertIn("Target   refs/heads/main\n", preview)
+            self.assertIn("Message  review this\n", preview)
+            self.assertIn(r"    selected  A  selected space\x09line\x0aend", preview)
+            self.assertIn("child pointers may also be staged", preview)
+            self.assertIn("Preview complete", preview)
+            rows = [line.split(maxsplit=1) for line in preview.splitlines()
+                    if line.strip().startswith("planned ")]
+            self.assertEqual(rows, [["planned", str(repo) if flags else "."]])
+        result = self.cli(repo, "publish", "--yes", "-m", "review this").stdout
+        self.assertLess(result.index("Preview\n"), result.index("Publishing\n"))
+        self.assertIn("published", result)
+        self.assertTrue(result.endswith("Complete\n"))
+        self.assertNotIn("selected changes and ahead commits pushed", result)
+
+    def test_maintenance_verbose_and_previews(self):
+        prefix = self.base / "pretty prefix\nname"
+        install = ["bash", str(PROJECT / "install.sh"), "--prefix", str(prefix), "--no-color"]
+        uninstall = ["bash", str(PROJECT / "uninstall.sh"), "--prefix", str(prefix), "--no-color"]
+        for flags in ((), ("-v", "--verbose")):
+            preview = self.run_cmd(install + ["--dry-run", *flags]).stdout
+            self.assertIn("bin/git-it", preview)
+            self.assertIn("Preview complete", preview)
+            self.assertIn(r"pretty prefix\x0aname", preview)
+            self.assertFalse(prefix.exists())
+        compact = self.run_cmd(install).stdout
+        self.assertIn("Installation complete", compact)
+        self.assertNotIn("bin/git-it", compact)
+        self.assertIn("bin/git-it", self.run_cmd(install + ["--verbose"]).stdout)
+        before = (prefix / "bin/git-it").read_bytes()
+        self.assertIn("bin/git-it", self.run_cmd(uninstall + ["--dry-run"]).stdout)
+        self.assertEqual((prefix / "bin/git-it").read_bytes(), before)
+        removed = self.run_cmd(uninstall + ["-v"]).stdout
+        self.assertIn("bin/git-it", removed)
+        self.assertIn("Removal complete", removed)
+        self.run_cmd(install)
+        manual = prefix / "share/man/man1/git-it.1"
+        manual.write_text(manual.read_text() + "\nlocal edit\n")
+        preserved = self.run_cmd(uninstall, ok=False)
+        self.assertEqual(preserved.returncode, 1)
+        self.assertIn("Preserve modified", preserved.stdout)
+        self.assertIn("Removal incomplete", preserved.stdout)
+        self.assertTrue(manual.exists())
+
     def test_help_diagnostics_and_machine_output_color_policy(self):
         env = self.env.copy(); env["NO_COLOR"] = "1"
         plain = self.cli(self.base, "--help", env=env).stdout
@@ -624,7 +751,8 @@ class GitItTest(unittest.TestCase):
                 if shutil.which(shell):
                     self.run_cmd([shell, "-n", str(installed)])
         bash_completion = str(prefix / destinations["bash"])
-        for word, expected in (("--col", "--color"), ("-h", "-h"), ("-V", "-V"), ("-m", "-m")):
+        for word, expected in (("--col", "--color"), ("-h", "-h"), ("-V", "-V"), ("-m", "-m"),
+                               ("--verb", "--verbose"), ("-v", "-v")):
             result = self.run_cmd(["bash", "-c", 'source "$1"; COMP_WORDS=(git-it "$2"); '
                                    'COMP_CWORD=1; _git_it; printf "%s\\n" "${COMPREPLY[@]}"',
                                    "completion-test", bash_completion, word])
@@ -635,7 +763,8 @@ class GitItTest(unittest.TestCase):
         self.assertEqual(set(result.stdout.splitlines()), {"auto", "always"})
         if shutil.which("fish"):
             for query, expected in (("git-it --col", "--color"), ("git-it -", "-h"),
-                                    ("git-it --color a", "always")):
+                                    ("git-it --color a", "always"), ("git-it --verb", "--verbose"),
+                                    ("git-it -", "-v")):
                 result = self.run_cmd(["fish", "--no-config", "-c",
                                        'source $argv[1]; complete -C $argv[2]',
                                        str(prefix / destinations["fish"]), query])
@@ -684,6 +813,8 @@ class GitItTest(unittest.TestCase):
             read_until(b"\r\nCOMPLETION_READY\r\n")
             os.write(master, b"git-it --col\t")
             read_until(b"--color")
+            os.write(master, b"\x15git-it --verb\t")
+            read_until(b"--verbose")
             os.write(master, b"\x15exit\n")
             proc.wait(timeout=5)
             self.assertEqual(proc.returncode, 0)

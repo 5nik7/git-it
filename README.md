@@ -139,19 +139,50 @@ Use `--config FILE` or `--no-config` per invocation. CLI options override config
 `--color auto|always|never` controls color; `--no-color` means never. Auto requires
 a terminal and no `NO_COLOR`; explicit always overrides that variable.
 
-Help headings and options, summary labels, operation statuses, and errors use
-color where applicable. Auto mode checks the destination stream: stdout for
-normal output and stderr for diagnostics. JSON, single-field values, formatted
-prompt output, version output, and generated completion scripts stay uncolored.
+Human output uses compact headings, aligned labels, and colored statuses:
+cyan for headings and plans, green for successful outcomes, yellow for warnings
+and cancellation, and red for blockers and failures. Text labels remain readable
+without color. Auto mode checks the destination stream: stdout for normal output
+and stderr for diagnostics. JSON, bare `path` output, single-field values,
+formatted prompt output, version output, and generated completion scripts stay
+uncolored.
 Help works without loading configuration; use CLI flags or `NO_COLOR` to control
 its colors. Color flags can appear before or after `--help`.
 
+Use `-v` or `--verbose` for additional explanations:
+
+```bash
+git-it info --verbose             # sanitized remote details and verified ancestry
+git-it sync -v                    # full repository paths and routine status reasons
+git-it publish --dry-run -v       # detailed local publication preview
+```
+
+Default operation output shows the root once, then uses `.` for that root and
+relative paths for descendants. Routine execution successes occupy one line;
+verbose mode adds their explanations and uses full paths. Blockers and failures
+always include their reasons. Publish previews show selected files, branches, destinations,
+messages, and child-pointer caveats. Dry-run limits remain visible in both modes.
+Publication preview and execution have separate headings, followed by a result
+that distinguishes completion, partial failure, and cancellation.
+
+Inspection labels describe ownership as a configured owner match, not access
+verification; missing metadata is shown as `Not configured`. Verbose mode adds
+the sanitized URL, protocol, remote repository name, and verified ancestry.
+It does not print raw Git logs or commands. There is no verbosity configuration
+key. Repeating `-v` or `--verbose` has no additional effect; `-V` remains version.
+Verbose does not change JSON, bare paths, field values, prompt formats, icons,
+field lists, version output, or generated completion source.
+
 The installer and uninstaller also accept `--color auto|always|never` and
-`--no-color`, honor `NO_COLOR` in auto mode, and keep redirected output plain:
+`--no-color`, honor `NO_COLOR` in auto mode, and keep redirected output plain.
+Their default output shows the prefix and result. Add `-v` or `--verbose` for
+per-file actions; dry runs always list intended actions, and modified-file
+preservation warnings are always shown:
 
 ```bash
 bash ./git-it --help --color always
 bash ./install.sh --dry-run --color always
+bash ./install.sh --verbose
 ```
 
 Ownership is an exact host/namespace match, not proof of authentication or write

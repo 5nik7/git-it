@@ -4,7 +4,7 @@ completion() {
         bash) cat <<'EOF'
 _git_it() {
     local cur=${COMP_WORDS[COMP_CWORD]} prev=${COMP_WORDS[COMP_CWORD-1]}
-    local opts='info path sync publish --sync -C --config --no-config --color --no-color --get --json -f --format --list-fields -i --icon --remote --outermost --dry-run --all --yes -m --message -n --no-newline --completion -h --help -V --version'
+    local opts='info path sync publish --sync -C --config --no-config --color --no-color -v --verbose --get --json -f --format --list-fields -i --icon --remote --outermost --dry-run --all --yes -m --message -n --no-newline --completion -h --help -V --version'
     COMPREPLY=()
     case $prev in
         -C) mapfile -t COMPREPLY < <(compgen -d -- "$cur"); compopt -o filenames; return ;;
@@ -30,6 +30,7 @@ _git_it() {
         '--no-config[Ignore configuration]' \
         '--color[Color policy]:policy:(auto always never)' \
         '--no-color[Disable color]' \
+        '--verbose[Show additional explanations]' '-v[Show additional explanations]' \
         '--get[Single field]:field:(root remote url protocol host owner repo owned icon current parent outermost parent_dirname parent_basename submodule_prefix submodule_basename cwd_prefix path_parent path_outermost chain_length chain_repos chain_paths is_submodule)' \
         '--format[Named field format]:format:' \
         '-f[Named field format]:format:' \
@@ -63,6 +64,7 @@ complete -c git-it -l icon -s i -d 'Host icon'
 complete -c git-it -l no-newline -s n -d 'Suppress newline'
 complete -c git-it -l help -s h -d 'Help'
 complete -c git-it -l version -s V -d 'Version'
+complete -c git-it -l verbose -s v -d 'Show additional explanations'
 complete -c git-it -l sync -d 'Synchronize repository tree'
 for flag in no-config no-color json list-fields outermost dry-run all yes remote
     complete -c git-it -l $flag

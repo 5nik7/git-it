@@ -2,7 +2,7 @@
 # shellcheck disable=SC2034
 die() {
     colors
-    display "$2"; printf '%sgit-it:%s %s\n' "$ERR_RED" "$ERR_RESET" "$REPLY" >&2
+    ui_error 'git-it' "$2"
     exit "$1"
 }
 canonical_dir() { (cd -- "$1" && pwd -P); }
@@ -50,8 +50,50 @@ display() {
     done
 }
 
+# Human presentation only. Callers keep exact/data output on separate paths.
+ui_heading() {
+    display "$1"
+    printf '%s%s%s%s\n' "$BOLD" "${2:-$CYAN}" "$REPLY" "$RESET"
+}
+
+ui_field() {
+    local label=$1
+    display "${2:-Not configured}"
+    printf '  %s%-12s%s %s\n' "$CYAN" "$label" "$RESET" "$REPLY"
+}
+
+ui_detail() {
+    display "$1"
+    printf '    %s\n' "$REPLY"
+}
+
+ui_status() {
+    local state=$1 value=$2 tint=$CYAN
+    case $state in
+        blocked|failed) tint=$RED ;;
+        updated|published|unchanged|Install) tint=$GREEN ;;
+        cancelled|'Preserve modified') tint=$YELLOW ;;
+    esac
+    display "$value"
+    printf '  %s%-10s%s %s\n' "$tint" "$state" "$RESET" "$REPLY"
+}
+
+ui_error() {
+    local label=$1
+    display "$2"
+    printf '%s%s:%s\n  %s\n' "$ERR_RED" "$label" "$ERR_RESET" "$REPLY" >&2
+}
+
+ui_summary() {
+    printf '\n'
+    ui_heading "$1" "$2"
+    [[ -z ${3:-} ]] || ui_detail "$3"
+    return 0
+}
+
 help() {
-    printf '%sGIT-IT%s  %s\n' "$BOLD" "$RESET" "$VERSION"
+    ui_heading "GIT-IT  $VERSION"
+    printf '\n'
     local line label detail
     while IFS= read -r line; do
         case $line in
@@ -78,6 +120,7 @@ Global options:
   --config FILE           Read Git-config syntax from FILE
   --no-config             Ignore user configuration
   --color auto|always|never, --no-color
+  -v, --verbose           Show full paths and additional explanations
   -h, --help              Show this help without requiring Git
   -V, --version           Show version
   --completion SHELL      Generate bash, zsh, or fish completion
@@ -145,7 +188,7 @@ main() {
     local arg command_set=0 selector=0 show_help=0 show_version=0 completion_shell=''
     CMD=info TARGET=. COLOR=auto COLOR_SET=0 CONFIG=${XDG_CONFIG_HOME:-$HOME/.config}/git-it/config
     NO_CONFIG=0 EXPLICIT_CONFIG=0 REMOTE_ARG='' FORMAT='' FORMAT_SET=0 GET='' JSON=0 ICON=0 NEWLINE=1
-    OUTERMOST=0 DRY_RUN=0 ADVANCE=0 ALL=0 YES=0 MESSAGE='' LIST_FIELDS=0
+    OUTERMOST=0 DRY_RUN=0 ADVANCE=0 ALL=0 YES=0 MESSAGE='' LIST_FIELDS=0 VERBOSE=0
     while (($#)); do
         arg=$1; shift
         case $arg in
@@ -172,6 +215,7 @@ main() {
                 else (($#)) || die 2 '--remote requires a name for inspection'; REMOTE_ARG=$1; shift; fi ;;
             --no-config) NO_CONFIG=1 ;;
             --no-color) COLOR=never; COLOR_SET=1 ;;
+            -v|--verbose) VERBOSE=1 ;;
             -i|--icon) ICON=1; ((selector+=1)) ;;
             --json) JSON=1; ((selector+=1)) ;;
             -n|--no-newline) NEWLINE=0 ;;

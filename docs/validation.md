@@ -64,6 +64,30 @@ live installation, shell configuration change, commit, or external push was
 performed. Linux CI was not run for this update. The earlier timing evidence
 below is retained; benchmarks were not rerun for these presentation changes.
 
+## Compact output and verbosity update — September 28, 2026
+
+The final native Termux integration run passed: **47 tests in 104.062 seconds**,
+with no skips. Bash syntax, ShellCheck, Bash/Zsh/Fish completion checks, mandoc
+lint, and edited-file whitespace checks passed.
+
+Coverage includes compact and verbose inspection, escaped filenames and
+redacted URLs, relative versus absolute operation paths, default-visible
+blockers and partial completion, grouped publication selections, separate
+preview/execution headings, and human/JSON cancellation. Exact-output modes
+produce identical output and exit codes with and without verbosity. Disposable
+installation checks cover per-file verbosity, complete dry-run previews, and
+modified-file preservation. Existing rollback and Git mutation safety tests pass.
+
+A separate 48-column PTY publication preview check confirmed automatic ANSI
+color, labeled destination/message lines, and credential/query-string redaction.
+Long paths and explanations remain intact; the terminal handles wrapping.
+
+All operation and installation mutations used disposable test-owned roots and
+local remotes. No live installation, shell configuration change, project commit, or
+external push was performed. Linux CI and timing benchmarks were not rerun;
+the historical timing evidence below is unchanged. Inspection/prompt code paths
+add no Git calls or worktree scans.
+
 ## Prompt timing
 
 Thirty sequential warm invocations per scenario, preceded by three warmups, in

@@ -179,9 +179,25 @@ inspect_main() {
         elif ((FORMAT_SET)); then render_format "$FORMAT"
         elif [[ $CMD == path ]]; then display "$ROOT"; printf '%s' "$REPLY"
         else
-            for key in root remote host owner repo owned; do
-                display "${F[$key]}"; printf '%s%-8s%s %s\n' "$CYAN" "$key" "$RESET" "$REPLY"
-            done
+            ui_heading "Repository ${ROOT##*/}"
+            ui_field Root "$ROOT"
+            ui_field Remote "$REMOTE"
+            ui_field Host "$HOST"
+            ui_field Owner "$OWNER"
+            if [[ $OWNED == true ]]; then ui_field Ownership 'Matches configured owner'
+            else ui_field Ownership 'No configured owner match'; fi
+            if ((VERBOSE)); then
+                printf '\n'
+                ui_heading 'Remote details'
+                ui_field Repository "$REPO"
+                ui_field URL "$SAFE_URL"
+                ui_field Protocol "$PROTOCOL"
+                printf '\n'
+                ui_heading 'Verified ancestry'
+                ui_field Parent "${F[parent]:-None}"
+                ui_field Outermost "${F[outermost]}"
+                for key in "${CHAIN[@]}"; do ui_detail "$key"; done
+            fi
             return 0
         fi
     fi

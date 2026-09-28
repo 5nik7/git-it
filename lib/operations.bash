@@ -1,18 +1,46 @@
 # Ordered, incremental operations. Every failure is an explicit subtree result.
 # shellcheck disable=SC2034
 event() {
-    local dir=$1 state=$2 reason=$3 status_color=$CYAN
+    local dir=$1 state=$2 reason=$3 shown=$1 detail
+    # Optional display lines replace the human reason, never the JSON detail.
+    shift 3
     EVENT_DIRS+=("$dir"); EVENT_STATES+=("$state"); EVENT_REASONS+=("$reason")
     [[ $state != blocked && $state != failed ]] || RESULT=1
+    [[ $state != cancelled ]] || CANCELLED=1
     if ((!JSON)); then
-        case $state in
-            blocked|failed) status_color=$RED ;;
-            updated|published|unchanged) status_color=$GREEN ;;
-            cancelled) status_color=$YELLOW ;;
-        esac
-        display "$dir"; printf '%s%-9s%s %s\n' "$status_color" "$state" "$RESET" "$REPLY"
-        display "$reason"; printf '          %s\n' "$REPLY"
+        if ((!VERBOSE)); then
+            if [[ $dir == "$ROOT" ]]; then shown=.
+            elif [[ $dir == "${ROOT%/}/"* ]]; then shown=${dir#"${ROOT%/}/"}; fi
+        fi
+        if [[ $state == selected && $LAST_EVENT_DIR == "$dir" ]]; then
+            ui_detail "selected  $reason"
+        elif [[ $state == planned && $LAST_EVENT_DIR == "$dir" ]]; then
+            ui_detail "$reason"
+        else
+            ui_status "$state" "$shown"
+            # Preview uncertainty and actionable details are never hidden.
+            if ((VERBOSE)) || [[ $OP_PHASE == preview || $state != @(updated|published|unchanged) ]]; then
+                if (($#)); then
+                    for detail in "$@"; do ui_detail "$detail"; done
+                else ui_detail "$reason"; fi
+            fi
+        fi
+        LAST_EVENT_DIR=$dir
     fi
+}
+
+operations_heading() {
+    ((JSON)) && return 0
+    ui_heading "${CMD^}"
+    ui_field Root "$ROOT"
+    if [[ $CMD == sync ]]; then
+        if ((ADVANCE)); then ui_field Mode 'Configured submodule branches'
+        else ui_field Mode 'Pinned submodules'; fi
+    elif ((ALL)); then ui_field Mode 'Tracked and untracked changes'
+    else ui_field Mode 'Staged changes'; fi
+    if ((DRY_RUN)); then ui_field Preview 'Local only; no network or writes'; fi
+    printf '\n'
+    if [[ $CMD == publish ]]; then ui_heading Preview; fi
 }
 
 cleanup_locks() {
@@ -321,7 +349,8 @@ publish_preview() {
         PREVIEW_DEST[$dir]=$PUSH_URL; PREVIEW_REF[$dir]=$UP_REF
         PREVIEW_REMOTE[$dir]=$UP_REMOTE; PREVIEW_BRANCH[$dir]=$BRANCH
         ((PUBLISH_CANDIDATES+=1))
-        event "$dir" planned "branch $BRANCH: publish to $dest; message: $MESSAGE"
+        event "$dir" planned "branch $BRANCH: publish to $dest; message: $MESSAGE" \
+            "Branch   $BRANCH" "Push to  $SAFE_URL" "Target   $UP_REF" "Message  $MESSAGE"
         [[ -z $parent ]] || EXPECTED[$parent]=1
     else
         event "$dir" unchanged 'no selected changes or known ahead commits (remote state not fetched)'
@@ -406,12 +435,15 @@ publish_node() {
 
 operations_main() {
     EVENT_DIRS=(); EVENT_STATES=(); EVENT_REASONS=(); LOCKS=(); PUB_DIRS=(); RESULT=0; PUBLISH_CANDIDATES=0
+    CANCELLED=0 LAST_EVENT_DIR='' OP_PHASE=execution
+    if ((DRY_RUN)) || [[ $CMD == publish ]]; then OP_PHASE=preview; fi
     declare -gA HELD=() VISITED=() BLOCKED=() SNAPSHOTS=() PARENT=() EXPECTED=()
     declare -gA PREVIEW_DEST=() PREVIEW_REF=() PREVIEW_REMOTE=() PREVIEW_BRANCH=()
     trap cleanup_locks EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM
     if ((OUTERMOST)); then ancestry; ROOT=${CHAIN[0]}; fi
+    operations_heading
     if [[ $CMD == sync ]]; then sync_node "$ROOT" || RESULT=1
     else
         command -v sha256sum >/dev/null 2>&1 || die 3 'publishing requires sha256sum'
@@ -435,6 +467,8 @@ operations_main() {
                 IFS= read -r answer || answer=''
                 if [[ $answer != y && $answer != Y ]]; then event "$ROOT" cancelled 'nothing committed or pushed'; operations_report; return "$RESULT"; fi
             fi
+            OP_PHASE=execution LAST_EVENT_DIR=''
+            if ((!JSON)); then printf '\n'; ui_heading Publishing; fi
             for dir in "${PUB_DIRS[@]}"; do
                 parent=${PARENT[$dir]}
                 # Validate parent BEFORE permitting the known child-induced change.
@@ -467,8 +501,16 @@ operations_report() {
         done
         printf ']}\n'
     else
-        if ((RESULT)); then printf '%sIncomplete%s — completed work is retained; resolve blockers and rerun.\n' "$RED" "$RESET"
-        elif ((DRY_RUN)); then printf '%sPreview complete%s; remote state and undiscovered descendants were not checked.\n' "$CYAN" "$RESET"
-        else printf '%sComplete%s\n' "$GREEN" "$RESET"; fi
+        if ((CANCELLED)); then
+            ui_summary Cancelled "$YELLOW" 'Nothing committed or pushed.'
+            if ((RESULT)); then ui_detail 'Preflight blockers remain; resolve them before publishing.'; fi
+        elif ((RESULT)); then
+            if ((DRY_RUN)); then ui_summary 'Preview incomplete' "$RED" 'Resolve blockers and rerun; no changes were made.'
+            else ui_summary Incomplete "$RED" 'Completed work is retained; resolve blockers and rerun.'; fi
+        elif ((DRY_RUN)); then ui_summary 'Preview complete' "$CYAN"
+        elif [[ $CMD == publish && $PUBLISH_CANDIDATES == 0 ]]; then
+            ui_summary Complete "$GREEN" 'No selected changes or known ahead commits; remote state was not fetched.'
+        else ui_summary Complete "$GREEN"; fi
+        if ((DRY_RUN)); then ui_detail 'Remote state and undiscovered descendants were not checked.'; fi
     fi
 }

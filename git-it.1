@@ -1,4 +1,4 @@
-.TH GIT-IT 1 "September 20, 2026" "git-it 0.1.0" "User Commands"
+.TH GIT-IT 1 "September 28, 2026" "git-it 0.1.0" "User Commands"
 .SH NAME
 git-it \- inspect, synchronize, and publish Git repository trees
 .SH SYNOPSIS
@@ -87,6 +87,13 @@ source remain uncolored.
 .B --no-color
 Disable colors.
 .TP
+.B -v, --verbose
+Show full operation paths and routine status explanations. Inspection adds
+sanitized remote details and verified ancestry. Does not expose raw Git logs.
+Repeated flags have no additional effect. JSON, bare path output, field values,
+prompt formats, icons, field lists, version output and completion source are
+unchanged. There is no verbosity configuration key.
+.TP
 .BI "--completion " bash|zsh|fish
 Generate completion source without reading a repository.
 .TP
@@ -96,6 +103,20 @@ Print version.
 .B -h, --help
 Print usage.
 Help does not load configuration; CLI color flags and NO_COLOR apply.
+.SH HUMAN OUTPUT
+Headings and plans use cyan, successful outcomes green,
+warnings and cancellation
+yellow, and failures and blockers red. Text labels also identify each status.
+Operations show the root once and relative descendant paths; a dot means the
+operation root. Routine successes use one line unless verbose output is enabled.
+.PP
+Blocker and failure reasons, publication selections and destinations, commit
+messages, child-pointer caveats, and dry-run uncertainty are always visible.
+Publication preview and execution have separate headings. Final results identify
+completion, incomplete work, previews, and cancellation.
+.PP
+Inspection describes ownership as a configured owner match, not proof of access.
+Absent metadata is displayed as Not configured.
 .SH FIELDS
 root, remote, url, protocol, host, owner, repo, owned, icon, current, parent,
 outermost, parent_dirname, parent_basename, submodule_prefix,
@@ -143,6 +164,10 @@ Zsh completion. Include this directory on fpath before running compinit.
 Fish completion, loaded through the vendor completion path or sourced directly.
 .PP
 Custom prefixes may require completion search paths and MANPATH configuration.
+.PP
+The installer and uninstaller accept -v or --verbose to list managed file
+actions. Default output shows the prefix and result. Dry runs always list
+intended actions; modified-file preservation warnings are always visible.
 Shell startup files are not edited. Install and uninstall accept --dry-run,
 --color auto|always|never and --no-color. Auto mode honors NO_COLOR.
 Uninstall removes unchanged managed files and preserves modified files.

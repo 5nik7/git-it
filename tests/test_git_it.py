@@ -108,6 +108,37 @@ class GitItTest(unittest.TestCase):
             if shutil.which(shell):
                 self.run_cmd([shell, "-n"], input=result.stdout)
 
+    @unittest.skipUnless(shutil.which('zsh'), 'Zsh is not installed')
+    def test_zsh_command_completion_types_and_literal_candidates(self):
+        completion = self.base / 'completion space 雪'
+        completion.write_text(self.cli(self.base, '--completion', 'zsh').stdout)
+        script = r'''
+_arguments() { state=command; return 1; }
+_describe() {
+    local array=$4 entry
+    for entry in "${(@P)array}"; do printf '%s\t%s\n' "$2" "${entry%%:*}"; done
+}
+words=(git-it ''); CURRENT=2
+source "$1"
+'''
+        result = self.run_cmd(['zsh', '-f', '-c', script, 'fixture', str(completion)])
+        rows = [line.split('\t', 1) for line in result.stdout.splitlines()]
+        self.assertTrue(rows)
+        self.assertEqual({tag for tag, _ in rows}, {'commands'})
+        self.assertNotIn('\x1b', result.stdout)
+        # The independently maintained Bash source is the literal-candidate
+        # counterpart; command additions must stay aligned in both adapters.
+        completion.write_text(self.cli(self.base, '--completion', 'bash').stdout)
+        other = self.run_cmd(['bash', '--noprofile', '--norc', '-c', r'''
+source "$1"
+COMP_WORDS=(git-it ''); COMP_CWORD=1
+_git_it
+printf '%s\n' "${COMPREPLY[@]}"
+''', 'fixture', str(completion)])
+        commands = {word for word in other.stdout.splitlines() if not word.startswith('-')}
+        self.assertEqual({word for _, word in rows}, commands)
+        self.assertEqual(commands, {'info', 'path', 'sync', 'publish'})
+
     def test_icon_outside_repo_is_empty(self):
         self.assertEqual(self.cli(self.base, "-i").stdout, "")
         self.assertEqual(self.cli(self.base, "path", "--format", "{current}").stdout, "")
@@ -878,6 +909,8 @@ class GitItTest(unittest.TestCase):
         insecure.chmod(0o777)
         master, slave = pty.openpty()
         env = self.env.copy(); env["TERM"] = "xterm"
+        buffer_file = self.base / 'completed buffer'
+        env['COMPLETION_BUFFER'] = str(buffer_file)
         proc = subprocess.Popen(["zsh", "-f", "-i"], cwd=self.base, env=env,
                                 stdin=slave, stdout=slave, stderr=slave)
         os.close(slave)
@@ -897,21 +930,44 @@ class GitItTest(unittest.TestCase):
                     output += chunk
             self.assertIn(expected, output)
 
+        def complete(text, expected):
+            buffer_file.unlink(missing_ok=True)
+            os.write(master, b'\x15' + text.encode() + b'\t\x18')
+            deadline = time.monotonic() + 15
+            actual = None
+            while time.monotonic() < deadline:
+                if buffer_file.exists():
+                    actual = buffer_file.read_text()
+                    if actual in (expected, expected + ' '):
+                        break
+                if select.select([master], [], [], 0.1)[0]:
+                    try:
+                        os.read(master, 4096)
+                    except OSError:
+                        break
+            self.assertTrue(buffer_file.exists(), text)
+            # Terminal redraw may split a word across escape sequences. The
+            # editor buffer is the insertion contract, independent of rendering.
+            self.assertIn(actual, (expected, expected + ' '))
+
         try:
             directory = shlex.quote(str(prefix / "share/zsh/site-functions"))
             # CI images may have insecure system completion directories. Ignore
             # those entries while retaining compinit's checks for our fixture.
             setup = (f"fpath=({shlex.quote(str(insecure))} {directory} $fpath); "
                      "autoload -Uz compinit; compinit -i -D; "
+                     "capture_buffer() { print -rn -- \"$BUFFER\" > \"$COMPLETION_BUFFER\"; }; "
+                     "zle -N capture_buffer; bindkey '^X' capture_buffer; "
                      "bindkey '^I' complete-word; PS1='READY> '; print COMPLETION_READY\n")
             os.write(master, setup.encode())
             read_until(b"\r\nCOMPLETION_READY\r\n")
-            os.write(master, b"git-it --col\t")
-            read_until(b"--color")
-            os.write(master, b"\x15git-it --verb\t")
-            read_until(b"--verbose")
-            os.write(master, b"\x15git-it --no-prog\t")
-            read_until(b"--no-progress")
+            for text, expected in [('git-it --col', 'git-it --color'),
+                                   ('git-it --verb', 'git-it --verbose'),
+                                   ('git-it --no-prog', 'git-it --no-progress'),
+                                   ('git-it syn', 'git-it sync'),
+                                   ('git-it --color nev', 'git-it --color never'),
+                                   ('git-it --get cwd_', 'git-it --get cwd_prefix')]:
+                complete(text, expected)
             os.write(master, b"\x15exit\n")
             proc.wait(timeout=5)
             self.assertEqual(proc.returncode, 0)

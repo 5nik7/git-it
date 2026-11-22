@@ -66,6 +66,12 @@ autoload -Uz compinit && compinit
 source /path/to/prefix/share/fish/vendor_completions.d/git-it.fish
 ```
 
+Zsh identifies `info`, `path`, `sync`, and `publish` as commands, with options
+and option values retaining native completion tags. Shell completion preferences
+can color these types, including in Dots/fzf-tab, while inserted tokens and
+generated completion source remain literal. `git-it` does not change global
+shell styles or require Dots.
+
 Reinstall to upgrade an unmodified installation. Checksums identify managed files;
 unrelated collisions, symlink destinations and locally modified files are refused.
 Use the same prefix to uninstall:

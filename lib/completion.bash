@@ -22,8 +22,10 @@ EOF
         zsh) cat <<'EOF'
 #compdef git-it
 _git_it() {
+    local context state state_descr line
+    typeset -A opt_args
     _arguments \
-        '1:command:(info path sync publish)' \
+        '1:command:->command' \
         '--sync[Synchronize repository tree]' \
         '-C[Working directory]:directory:_directories' \
         '--config[Configuration file]:file:_files' \
@@ -47,6 +49,10 @@ _git_it() {
         '-m[Commit message]:message:' \
         '--completion[Generate completion]:shell:(bash zsh fish)' \
         '--help[Help]' '-h[Help]' '--version[Version]' '-V[Version]'
+    if [[ $state == command ]]; then
+        local -a commands=(info path sync publish)
+        _describe -t commands 'command' commands
+    fi
 }
 _git_it "$@"
 EOF

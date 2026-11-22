@@ -4,6 +4,23 @@ This record describes local execution of the initial implementation. The Linux
 workflow is configured in `.github/workflows/test.yml` but has not been run from
 this uncommitted checkout. No native Linux, macOS or Windows result is claimed.
 
+## Completion type follow-up — 2026-11-13 UTC
+
+Zsh now identifies the four root actions with the standard `commands` tag.
+Options, enumerated values, and filenames retain native completion handling;
+shell preferences can color these types without changing inserted words.
+No CLI flags, command behavior, live installation, or global styles changed.
+
+Four focused tests pass on Termux: API-free help/version/generated syntax,
+command tags with Bash literal-candidate parity, isolated installation of all
+three completion adapters, and actual Zsh editor insertion. The terminal test
+now reads the literal editor buffer through an owned widget because redraw
+sequences can split a completed word in a raw transcript. It verifies command,
+option and enum-value insertion without executing any offered command.
+Generated Bash/Zsh/Fish syntax, Bash source syntax, manual lint and whitespace
+checks pass. The complete Git operation suite was not rerun for this completion
+change. Host-specific Dots/fzf-tab rendering is separate integration evidence.
+
 ## Native environment
 
 - Android 15 / Termux, aarch64.

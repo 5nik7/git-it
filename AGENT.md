@@ -81,6 +81,13 @@ or validation commands into this project without an explicit task requiring them
   supported short options and option values. The installer must install all
   three completion files and the man page into the selected prefix, and the
   uninstaller must manage them with the same preservation rules as other files.
+- Preserve semantic Zsh completion tags: commands use `commands`, options and
+  enumerated values retain native `_arguments` tags, and paths use shell file
+  helpers. Shell preferences own menu colors; keep candidates literal, avoid
+  global style writes, and do not require Dots. Run the command-type/literal
+  candidate regression and actual Tab test in `tests/test_git_it.py` when
+  changing completion grammar. Review every command and nested context;
+  root-only examples do not establish coverage of option values or aliases.
 - Inspection and prompt modes remain local. Icon/path queries must not fetch,
   scan worktree status, or refresh the index.
 - Dry runs make no network calls, repository writes, or locks. Identify unknown

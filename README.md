@@ -1,19 +1,20 @@
 # git-it
 
-A modular Bash Git helper for Termux and Linux: local host icons, verified
-submodule paths, recursive download synchronization, and explicit publication.
+A Bash Git helper for Termux and Linux. Inspect remote URLs, format prompt
+fields, check status across registered submodules, and sync or publish changes.
 
 ```bash
 git-it -i                         # host icon for your prompt
 git-it info --json                # local metadata
+git-it -R --https                 # HTTPS form of the selected fetch URL
+git-it -s                         # recursive local status
 git-it sync                       # parent first, then pinned submodules
 git-it sync --remote              # explicitly advance configured child branches
 git-it publish --dry-run          # preview selected changes
 git-it publish -m 'Update config' # preview, confirm, commit and push
 ```
 
-Version **0.1.0**. Initial release with conservative operation rules. Termux and
-Linux are the targets; Linux CI is included. Actual validation is recorded in
+Version **0.1.0**. The repository includes a Linux CI workflow. See
 [docs/validation.md](docs/validation.md).
 
 ## Setup, run and installation
@@ -66,7 +67,7 @@ autoload -Uz compinit && compinit
 source /path/to/prefix/share/fish/vendor_completions.d/git-it.fish
 ```
 
-Zsh identifies `info`, `path`, `sync`, and `publish` as commands, with options
+Zsh identifies `info`, `path`, `status`, `sync`, and `publish` as commands, with options
 and option values retaining native completion tags. Shell completion preferences
 can color these types, including in Dots/fzf-tab, while inserted tokens and
 generated completion source remain literal. `git-it` does not change global
@@ -86,6 +87,18 @@ Uninstall removes only unchanged managed files. Modified files and user config
 are preserved; modified files produce a nonzero result and retain the manifest.
 Empty installation directories may remain. There is no self-update mechanism.
 
+Help reads `logo.txt` on each invocation. Standalone installation manages a
+copy at `share/git-it/logo.txt` in the selected prefix.
+
+### Using git-it through Dots
+
+On Termux, Linux, and WSL, an initialized Dots plugin provides
+`dots git it …` from the caller’s working directory. For example,
+`dots git it -R --https` runs the same query as `git-it -R --https`.
+Dots setup can acquire its recorded submodule using
+`dots files install --with-source git-it`. Standalone installation also works
+outside Dots.
+
 ## Inspection and prompt formatting
 
 ```bash
@@ -103,9 +116,26 @@ GitLab and Bitbucket have specific icons; other hosts and absent remotes use Git
 SSH, SCP-style, HTTPS, nested namespaces and local URLs are parsed. Displayed URLs
 omit credentials, query strings and fragments. Hostnames match exactly.
 
+| Query | Output |
+| --- | --- |
+| `-o`, `--owner` | Full owner or namespace |
+| `-H`, `--host` | Host |
+| `-r`, `--repo` | Repository name |
+| `-p`, `--protocol` | Transport protocol |
+| `-R`, `--url` | Sanitized fetch URL |
+| `--https`, `-R --https` | HTTPS clone URL |
+
+For `git@github.com:team/tool.git`, `git-it --https` prints
+`https://github.com/team/tool.git`. SSH host aliases use the configured
+`hostAlias` mapping. Conversion preserves the remote path and drops SSH
+credentials and ports. Existing HTTPS URLs retain their own port. A local or
+unsupported URL gives an empty `https_url` field. Use
+`git-it --remote upstream --https` to select another remote. These queries
+read local metadata and leave Git’s fetch and push configuration untouched.
+
 | Group | Fields |
 | --- | --- |
-| Remote | `root`, `remote`, `url`, `protocol`, `host`, `owner`, `repo`, `owned`, `icon` |
+| Remote | `root`, `remote`, `url`, `https_url`, `protocol`, `host`, `owner`, `repo`, `owned`, `icon` |
 | Roots | `current`, `parent`, `outermost`, `parent_dirname`, `parent_basename` |
 | Paths | `path_parent`, `path_outermost`, `submodule_prefix`, `submodule_basename`, `cwd_prefix` |
 | Ancestry | `is_submodule`, `chain_length`, `chain_repos`, `chain_paths` |
@@ -145,15 +175,12 @@ Use `--config FILE` or `--no-config` per invocation. CLI options override config
 `--color auto|always|never` controls color; `--no-color` means never. Auto requires
 a terminal and no `NO_COLOR`; explicit always overrides that variable.
 
-Human output uses compact headings, aligned labels, and colored statuses:
-cyan for headings and plans, green for successful outcomes, yellow for warnings
-and cancellation, and red for blockers and failures. Text labels remain readable
-without color. Auto mode checks the destination stream: stdout for normal output
-and stderr for diagnostics. JSON, bare `path` output, single-field values,
-formatted prompt output, version output, and generated completion scripts stay
-uncolored.
-Help works without loading configuration; use CLI flags or `NO_COLOR` to control
-its colors. Color flags can appear before or after `--help`.
+Human reports use aligned labels and semantic colors. With Dots available,
+git-it reads the active help, icon, layout, and progress preferences and the
+published Git and file styles. A standalone installation has built-in defaults.
+CLI color options control the destination stream. Metadata, JSON, formats,
+bare paths, version, and completion source stay plain. Help reads the logo and
+presentation settings without requiring Git or a git-it ownership config.
 
 Use `-v` or `--verbose` for additional explanations:
 
@@ -179,10 +206,10 @@ key. Repeating `-v` or `--verbose` has no additional effect; `-V` remains versio
 Verbose does not change JSON, bare paths, field values, prompt formats, icons,
 field lists, version output, or generated completion source.
 
-During `sync` and `publish`, a colored spinner identifies the active Git step:
-fetching, initializing, updating, checking out, committing, or pushing. It appears
-after a short delay and clears before the result is printed. This indicates
-activity, not a percentage or estimated completion time.
+Status, sync, and publish show delayed progress on stderr. The spinner marks an
+active phase. A bar measures completed repositories or steps when a total is
+known. Dots’ `none`, `spinner`, `bar`, and `both` preferences apply. The
+indicator clears before output and confirmation prompts.
 
 Animation requires both stdout and stderr to be terminals and a nonempty `TERM`
 other than `dumb`. It works with default and verbose output. JSON, dry runs,
@@ -212,6 +239,28 @@ Ownership is an exact host/namespace match, not proof of authentication or write
 access. No owner is hardcoded. Publication checks the effective push URL, including
 `pushurl`, rather than author identity or fetch URL. Local paths are not treated
 as owned remote destinations. SSH aliases require an explicit hostAlias mapping.
+
+## Recursive local status
+
+```bash
+git-it status
+git-it -s --short
+git-it -C ~/repos/project status --verbose --full-paths
+git-it status --outermost --json
+```
+
+`status` (also `-s` or `--status`) visits the selected worktree and its
+registered submodules parent first. The grouped view shows branch, worktree
+state, file counts and cached upstream divergence. Renames and copies retain
+both paths. Select `--view default|short|verbose`, or use `--short` or
+`-v`. `--full-paths` expands human paths. The report uses local tracking refs
+and never fetches, initializes children, or refreshes the index.
+
+Status JSON has `schema: 1`, `remote_state: "cached"`, ordered `repositories`,
+and `complete`. Each repository has its path, branch, status, ahead and behind
+counts (null when unavailable), and file records with `path`, `xy`, and
+`old_path`. Changes and ordinary file conflicts are reportable results.
+Unavailable subtrees produce exit code 1 and the remaining siblings are checked.
 
 ## Recursive download sync
 
@@ -295,7 +344,8 @@ and ancestry scenarios; no cold-start speed claim is made.
 | Old interface | New interface |
 | --- | --- |
 | `git-it -i` / `--icon` | Preserved |
-| `git-it -r`, `-o`, `-H`, `-p`, `-u` | `git-it info --get FIELD` |
+| `-r`, `-o`, `-H`, `-p` | Repository, owner, host, and protocol shortcuts |
+| Legacy URL queries | `-R` or `--https` |
 | `gitsub --json` | `git-it path --json` |
 | `gitsub -f '%M/%T/%W'` | `git-it path --format '{parent_basename}/{path_outermost}/{cwd_prefix}'` |
 | `git-up` | Separate `git-it sync` and `git-it publish` |

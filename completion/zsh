@@ -1,0 +1,71 @@
+#compdef git-it
+_git_it() {
+    local context state state_descr line cmd='' command_option='' word
+    local -i i value=0
+    local -a args
+    typeset -A opt_args
+    for ((i=2; i<CURRENT; i++)); do
+        word=${words[i]}
+        if (( value )); then value=0; continue; fi
+        case $word in
+            -C|--directory|--config|--color|--get|--format|-f|--message|-m|--completion|--view) value=1 ;;
+            --remote) [[ $cmd == sync ]] || value=1 ;;
+            -s|--status) cmd=status; command_option=$word ;;
+            --sync) cmd=sync; command_option=$word ;;
+            info|path|status|sync|publish) cmd=$word ;;
+        esac
+    done
+    args=(
+        '1:command:->command'
+        '-C[Working directory]:directory:_directories'
+        '--directory[Working directory]:directory:_directories'
+        '--config[Configuration file]:file:_files'
+        '--no-config[Ignore configuration]'
+        '--color[Color policy]:policy:(auto always never)' '--no-color[Disable color]'
+        '--no-progress[Disable spinner and progress bar]'
+        '--verbose[Show additional explanations]' '-v[Show additional explanations]'
+        '--json[JSON output]'
+        '--completion[Generate completion]:shell:(bash zsh fish)'
+        '--help[Help]' '-h[Help]' '--version[Version]' '-V[Version]'
+    )
+    if [[ -z $cmd ]]; then
+        args+=('--sync[Synchronize repository tree]' '--status[Show status]' '-s[Show status]')
+    elif [[ -n $command_option ]]; then
+        args+=("${command_option}[Select command]")
+    fi
+    if [[ -z $cmd || $cmd == info || $cmd == path ]]; then
+        args+=(
+            '--get[Single field]:field:(root remote url https_url protocol host owner repo owned icon current parent outermost parent_dirname parent_basename submodule_prefix submodule_basename cwd_prefix path_parent path_outermost chain_length chain_repos chain_paths is_submodule)'
+            '--format[Named field format]:format:' '-f[Named field format]:format:'
+            '--icon[Host icon]' '-i[Host icon]' '--list-fields[List fields]'
+            '--owner[Remote namespace]' '-o[Remote namespace]'
+            '--host[Remote host]' '-H[Remote host]' '--repo[Repository name]' '-r[Repository name]'
+            '--protocol[Remote protocol]' '-p[Remote protocol]'
+            '--url[Remote URL]' '-R[Remote URL]' '--https[HTTPS URL]'
+            '--no-newline[Suppress newline]' '-n[Suppress newline]'
+            '--remote[Choose inspection remote]:remote name:'
+        )
+    elif [[ $cmd == sync ]]; then
+        args+=('--remote[Advance configured submodule branches]')
+    fi
+    if [[ -z $cmd || $cmd == status ]]; then
+        args+=('--view[Choose status view]:view:(default short verbose)'
+               '--short[Use compact status view]' '--full-paths[Show absolute paths]')
+    fi
+    if [[ -z $cmd || $cmd == status || $cmd == sync || $cmd == publish ]]; then
+        args+=('--outermost[Start at verified outermost parent]')
+    fi
+    if [[ -z $cmd || $cmd == sync || $cmd == publish ]]; then
+        args+=('--dry-run[Preview without network or writes]')
+    fi
+    if [[ -z $cmd || $cmd == publish ]]; then
+        args+=('--all[Publish tracked and untracked changes]' '--yes[Accept publication preview]'
+               '--message[Commit message]:message:' '-m[Commit message]:message:')
+    fi
+    _arguments "${args[@]}"
+    if [[ $state == command ]]; then
+        local -a commands=(info path status sync publish)
+        _describe -t commands 'command' commands
+    fi
+}
+_git_it "$@"

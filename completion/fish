@@ -1,0 +1,64 @@
+# Return the command to the left of the cursor, ignoring option arguments.
+function __git_it_context
+    set -l cmd root
+    set -l pending 0
+    set -l words (commandline -opc)
+    for word in $words[2..-1]
+        if test $pending -eq 1
+            set pending 0
+            continue
+        end
+        switch $word
+            case -C --directory --config --color --get --format -f --message -m --completion --view
+                set pending 1
+            case --remote
+                if test $cmd != sync
+                    set pending 1
+                end
+            case -s --status
+                set cmd status
+            case --sync
+                set cmd sync
+            case info path status sync publish
+                set cmd $word
+        end
+    end
+    contains -- $cmd $argv
+end
+
+complete -c git-it -f
+complete -c git-it -n '__git_it_context root' -a 'info path status sync publish'
+complete -c git-it -n '__git_it_context root' -l status -s s -d 'Show local repository changes'
+complete -c git-it -n '__git_it_context root' -l sync -d 'Synchronize repository tree'
+complete -c git-it -s C -l directory -r -a '(__fish_complete_directories)' -d 'Working directory'
+complete -c git-it -l config -r -F -d 'Configuration file'
+complete -c git-it -l color -x -a 'auto always never'
+complete -c git-it -l completion -x -a 'bash zsh fish'
+complete -c git-it -l help -s h -d 'Help'
+complete -c git-it -l version -s V -d 'Version'
+complete -c git-it -l verbose -s v -d 'Show additional explanations'
+for flag in no-config no-color no-progress json
+    complete -c git-it -l $flag
+end
+set -l inspect '__git_it_context root info path'
+complete -c git-it -n "$inspect" -l get -x -a 'root remote url https_url protocol host owner repo owned icon current parent outermost parent_dirname parent_basename submodule_prefix submodule_basename cwd_prefix path_parent path_outermost chain_length chain_repos chain_paths is_submodule'
+complete -c git-it -n "$inspect" -l format -s f -x
+complete -c git-it -n "$inspect" -l icon -s i -d 'Host icon'
+complete -c git-it -n "$inspect" -l owner -s o -d 'Remote namespace'
+complete -c git-it -n "$inspect" -l host -s H -d 'Remote host'
+complete -c git-it -n "$inspect" -l repo -s r -d 'Repository name'
+complete -c git-it -n "$inspect" -l protocol -s p -d 'Remote protocol'
+complete -c git-it -n "$inspect" -l url -s R -d 'Remote URL'
+complete -c git-it -n "$inspect" -l https -d 'HTTPS URL'
+complete -c git-it -n "$inspect" -l no-newline -s n -d 'Suppress newline'
+complete -c git-it -n "$inspect" -l list-fields -d 'List fields'
+complete -c git-it -n "$inspect" -l remote -x -d 'Choose inspection remote'
+complete -c git-it -n '__git_it_context sync' -l remote -d 'Advance configured submodule branches'
+complete -c git-it -n '__git_it_context root status' -l view -x -a 'default short verbose'
+complete -c git-it -n '__git_it_context root status' -l short -d 'Use compact status view'
+complete -c git-it -n '__git_it_context root status' -l full-paths -d 'Show absolute paths'
+complete -c git-it -n '__git_it_context root status sync publish' -l outermost
+complete -c git-it -n '__git_it_context root sync publish' -l dry-run
+complete -c git-it -n '__git_it_context root publish' -l message -s m -x
+complete -c git-it -n '__git_it_context root publish' -l all
+complete -c git-it -n '__git_it_context root publish' -l yes

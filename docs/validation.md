@@ -1,8 +1,27 @@
 # Validation evidence
 
-This record describes local execution of the initial implementation. The Linux
-workflow is configured in `.github/workflows/test.yml` but has not been run from
-this uncommitted checkout. No native Linux, macOS or Windows result is claimed.
+The checks below ran locally on Termux. The repository also has a Linux
+workflow in `.github/workflows/test.yml`.
+
+## Remote queries, recursive status and Dots presentation — 2026-11-23 UTC
+
+All 66 standalone tests passed on Termux with Bash 5.3.20 and Git 2.56.1.
+ShellCheck, Bash/Zsh/Fish syntax checks, and mandoc lint passed.
+
+Disposable repositories covered remote precedence, SSH-to-HTTPS conversion,
+credential redaction, and the five short field selectors. A command trace
+recorded four local Git calls per quick query with `--no-config`. A separate
+ten-run warm benchmark counted four Git calls for icon lookup with both zero
+and 3,000 untracked files. Path inspection took six, nine, and eleven Git
+calls at depths one, two, and three.
+
+Status fixtures covered staged changes, conflicts, renames, cached divergence,
+and missing or unregistered children. Tests compared the index and refs before
+and after inspection. Terminal tests exercised Dots preferences, file groups,
+spinner and bar modes, interruption cleanup, and layouts at 40, 80, and 120
+columns. Installer fixtures exercised the installed logo and all three shell
+completions, including actual Zsh Tab insertion. Hosted CI and native desktop
+platforms were outside this run.
 
 ## Completion type follow-up — 2026-11-13 UTC
 

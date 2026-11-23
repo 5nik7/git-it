@@ -1,0 +1,38 @@
+_git_it() {
+    local cur=${COMP_WORDS[COMP_CWORD]} cmd='' value='' word opts i
+    local commands='info path status sync publish'
+    local global='-C --directory --config --no-config --color --no-color --no-progress -v --verbose --completion -h --help -V --version'
+    local inspect='--get -f --format --list-fields -i --icon --remote -o --owner -H --host -r --repo -p --protocol -R --url --https -n --no-newline'
+    local status='--view --short --full-paths'
+    local publish='--all --yes -m --message'
+    COMPREPLY=()
+    for ((i=1; i<COMP_CWORD; i++)); do
+        word=${COMP_WORDS[i]}
+        if [[ -n $value ]]; then value=''; continue; fi
+        case $word in
+            -C|--directory|--config|--color|--get|--format|-f|--message|-m|--completion|--view) value=$word ;;
+            --remote) [[ $cmd == sync ]] || value=$word ;;
+            -s|--status) cmd=status ;;
+            --sync) cmd=sync ;;
+            info|path|status|sync|publish) cmd=$word ;;
+        esac
+    done
+    case $value in
+        -C|--directory) mapfile -t COMPREPLY < <(compgen -d -- "$cur"); compopt -o filenames; return ;;
+        --config) mapfile -t COMPREPLY < <(compgen -f -- "$cur"); compopt -o filenames; return ;;
+        --color) opts='auto always never' ;;
+        --view) opts='default short verbose' ;;
+        --completion) opts='bash zsh fish' ;;
+        --get) opts='root remote url https_url protocol host owner repo owned icon current parent outermost parent_dirname parent_basename submodule_prefix submodule_basename cwd_prefix path_parent path_outermost chain_length chain_repos chain_paths is_submodule' ;;
+        '') case $cmd in
+                info|path) opts="$global $inspect --json" ;;
+                status) opts="$global $status --outermost --json" ;;
+                sync) opts="$global --outermost --dry-run --remote --json" ;;
+                publish) opts="$global --outermost --dry-run $publish --json" ;;
+                *) opts="$commands -s --status --sync $global $inspect $status --outermost --dry-run $publish --json" ;;
+            esac ;;
+        *) return ;;
+    esac
+    mapfile -t COMPREPLY < <(compgen -W "$opts" -- "$cur")
+}
+complete -F _git_it git-it

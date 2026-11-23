@@ -26,10 +26,11 @@ class GitItTest(unittest.TestCase):
         self.home.mkdir()
         self.env = os.environ.copy()
         for key in list(self.env):
-            if key.startswith("GIT_"):
+            if key.startswith(("GIT_", "DOTS")):
                 self.env.pop(key)
         self.env.update(
             HOME=str(self.home), XDG_CONFIG_HOME=str(self.home / ".config"),
+            DOTS=str(self.base / "no-dots"), XDG_STATE_HOME=str(self.home / ".state"),
             GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
             GIT_AUTHOR_NAME="Git It Test", GIT_COMMITTER_NAME="Git It Test",
             GIT_AUTHOR_EMAIL="test@example.invalid", GIT_COMMITTER_EMAIL="test@example.invalid",
@@ -137,7 +138,7 @@ printf '%s\n' "${COMPREPLY[@]}"
 ''', 'fixture', str(completion)])
         commands = {word for word in other.stdout.splitlines() if not word.startswith('-')}
         self.assertEqual({word for _, word in rows}, commands)
-        self.assertEqual(commands, {'info', 'path', 'sync', 'publish'})
+        self.assertEqual(commands, {'info', 'path', 'status', 'sync', 'publish'})
 
     def test_icon_outside_repo_is_empty(self):
         self.assertEqual(self.cli(self.base, "-i").stdout, "")
@@ -330,8 +331,8 @@ printf '%s\n' "${COMPREPLY[@]}"
         (repo / "untracked").write_text("leave me\n")
         self.git(repo, "add", "staged")
         preview = self.cli(repo, "publish", "--dry-run")
-        self.assertIn("selected", preview.stdout)
-        self.assertNotIn("?? untracked", preview.stdout)
+        self.assertIn("    staged added (1)\n      staged\n", preview.stdout)
+        self.assertNotIn("untracked", preview.stdout)
         self.cli(repo, "publish", "--yes", "-m", "selected commit")
         self.assertEqual(self.git(repo, "log", "-1", "--format=%s"), "selected commit")
         self.assertEqual(self.git(bare, "rev-parse", "main"), self.git(repo, "rev-parse", "HEAD"))
@@ -588,7 +589,7 @@ printf '%s\n' "${COMPREPLY[@]}"
         env = self.env.copy()
         env.pop("NO_COLOR", None)
         env.update(PATH=str(wrappers) + os.pathsep + env["PATH"],
-                   REAL_GIT=shutil.which("git"), TERM="xterm")
+                   REAL_GIT=shutil.which("git"), TERM="xterm", DOTS_ICONS="never")
 
         def terminal_run(args, overrides=None, interrupt=None, stderr_tty=True):
             run_env = env.copy()
@@ -645,9 +646,9 @@ printf '%s\n' "${COMPREPLY[@]}"
                 self.assertEqual(b"\x1b[" in output, colored)
                 if animated:
                     plain = re.sub(rb"\x1b\[[0-9;]*m", b"", output)
-                    frames = re.findall(rb"\r  ([|/\\-]) Fetching", plain)
+                    frames = re.findall(rb"\r([|/\\-]) Fetching", plain)
                     self.assertGreaterEqual(len(set(frames)), 2, output)
-                    self.assertIn(b"\r            \r  unchanged", plain)
+                    self.assertRegex(plain, rb"\r +\r  unchanged")
                 if "--json" in args:
                     self.assertTrue(json.loads(output)["complete"])
                 self.assertFalse((repo / ".git/git-it.lock").exists())
@@ -658,7 +659,7 @@ printf '%s\n' "${COMPREPLY[@]}"
         self.assertIn(b"Incomplete", failed)
         for sig in (signal.SIGINT, signal.SIGTERM):
             _, interrupted = terminal_run((), interrupt=sig)
-            self.assertIn(b"\r            \r", interrupted)
+            self.assertRegex(interrupted, rb"\r +\r")
             self.assertFalse((repo / ".git/git-it.lock").exists())
         self.assertNotIn(b"Fetching", terminal_run((), stderr_tty=False)[1])
         piped = self.cli(repo, "sync", "--color=always", env=env).stdout
@@ -742,7 +743,9 @@ printf '%s\n' "${COMPREPLY[@]}"
             self.assertIn("Push to  ssh://example.invalid", preview)
             self.assertIn("Target   refs/heads/main\n", preview)
             self.assertIn("Message  review this\n", preview)
-            self.assertIn(r"    selected  A  selected space\x09line\x0aend", preview)
+            heading = "[A ] staged added (1)" if flags else "staged added (1)"
+            self.assertIn("    " + heading + "\n", preview)
+            self.assertIn(r"      selected space\x09line\x0aend", preview)
             self.assertIn("child pointers may also be staged", preview)
             self.assertIn("Preview complete", preview)
             rows = [line.split(maxsplit=1) for line in preview.splitlines()
@@ -788,13 +791,13 @@ printf '%s\n' "${COMPREPLY[@]}"
         plain = self.cli(self.base, "--help", env=env).stdout
         colored = self.cli(self.base, "--help", "--color=always", env=env).stdout
         self.assertNotIn("\x1b[", plain)
-        self.assertIn("\x1b[36mUsage:", colored)
-        self.assertIn("\x1b[36mCommands:", colored)
-        self.assertIn("\x1b[36m--config FILE", colored)
+        self.assertIn("\x1b[1;96mUsage:", colored)
+        self.assertIn("\x1b[1;96mCommands:", colored)
+        self.assertIn("\x1b[33m--config\x1b[0m", colored)
         self.assertNotIn("\x1b[", self.cli(self.base, "--color=always", "--help", "--no-color").stdout)
         error = self.cli(self.base, "--color=always", "--invalid", env=env, ok=False)
         self.assertEqual(error.returncode, 2)
-        self.assertIn("\x1b[31mgit-it:", error.stderr)
+        self.assertIn("\x1b[91mgit-it:", error.stderr)
         repo = self.repo("plain-outputs")
         for args in (("--json",), ("--get", "root"), ("--format", "{root}"),
                      ("--list-fields",), ("--version",), ("--completion", "bash"),
@@ -802,7 +805,7 @@ printf '%s\n' "${COMPREPLY[@]}"
             with self.subTest(args=args):
                 self.assertNotIn("\x1b[", self.cli(repo, "--color=always", *args).stdout)
         result = self.cli(repo, "--color=always", "sync", "--dry-run", ok=False)
-        self.assertIn("\x1b[31mblocked", result.stdout)
+        self.assertIn("\x1b[91mblocked", result.stdout)
         result = self.cli(repo, "--color=always", "sync", "--dry-run", "--json", ok=False)
         self.assertNotIn("\x1b[", result.stdout + result.stderr)
         self.assertFalse(json.loads(result.stdout)["complete"])
@@ -851,16 +854,16 @@ printf '%s\n' "${COMPREPLY[@]}"
         prefix = self.base / "color-prefix"
         for action in ("install", "uninstall"):
             command = ["bash", str(PROJECT / f"{action}.sh"), "--prefix", str(prefix)]
-            self.assertIn("\x1b[36mUsage:", self.run_cmd(command + ["--help", "--color=always"]).stdout)
+            self.assertIn("\x1b[1;96mUsage:", self.run_cmd(command + ["--help", "--color=always"]).stdout)
             result = self.run_cmd(command + ["--color=always", "--invalid"], ok=False)
-            self.assertIn("\x1b[31mgit-it maintenance:", result.stderr)
+            self.assertIn("\x1b[91mgit-it maintenance:", result.stderr)
             self.assertEqual(result.returncode, 1)
         install = ["bash", str(PROJECT / "install.sh"), "--prefix", str(prefix)]
-        self.assertIn("\x1b[32mInstall", self.run_cmd(install + ["--dry-run", "--color=always"]).stdout)
+        self.assertIn("\x1b[92mInstall", self.run_cmd(install + ["--dry-run", "--color=always"]).stdout)
         self.assertFalse(prefix.exists())
         self.assertNotIn("\x1b[", self.run_cmd(install + ["--color=always", "--no-color"]).stdout)
         uninstall = ["bash", str(PROJECT / "uninstall.sh"), "--prefix", str(prefix)]
-        self.assertIn("\x1b[36mRemove", self.run_cmd(uninstall + ["--color=always"]).stdout)
+        self.assertIn("\x1b[96mRemove", self.run_cmd(uninstall + ["--color=always"]).stdout)
 
     def test_installed_manual_and_completions(self):
         prefix = self.base / "completion prefix"
@@ -965,6 +968,9 @@ printf '%s\n' "${COMPREPLY[@]}"
                                    ('git-it --verb', 'git-it --verbose'),
                                    ('git-it --no-prog', 'git-it --no-progress'),
                                    ('git-it syn', 'git-it sync'),
+                                   ('git-it --stat', 'git-it --status'),
+                                   ('git-it status --view sho', 'git-it status --view short'),
+                                   ('git-it info --get https_', 'git-it info --get https_url'),
                                    ('git-it --color nev', 'git-it --color never'),
                                    ('git-it --get cwd_', 'git-it --get cwd_prefix')]:
                 complete(text, expected)

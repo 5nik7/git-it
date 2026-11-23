@@ -6,7 +6,7 @@ repo_root() {
 }
 
 list_fields() {
-    printf '%s\n' root remote url protocol host owner repo owned icon current parent outermost \
+    printf '%s\n' root remote url https_url protocol host owner repo owned icon current parent outermost \
         parent_dirname parent_basename submodule_prefix submodule_basename cwd_prefix \
         path_parent path_outermost chain_length chain_repos chain_paths is_submodule
 }
@@ -24,34 +24,75 @@ select_remote() {
     URL=''
     if text_cmd git -C "$dir" remote get-url -- "$REMOTE" 2>/dev/null; then URL=$REPLY
     elif [[ -n $REMOTE_ARG ]]; then return 1
+    elif [[ $REMOTE != origin ]] && text_cmd git -C "$dir" remote get-url -- origin 2>/dev/null; then REMOTE=origin; URL=$REPLY
     else REMOTE=''; fi
 }
 
+https_path() {
+    # SCP paths are literal. In ssh:// URLs an existing percent escape already
+    # represents its byte. Encode other bytes that are not URI path characters.
+    local path=$1 uri=$2 char escape hex i
+    local -a bytes
+    local allowed="[a-zA-Z0-9._~!\$&'()*+,;=:@/-]"
+    if [[ $path =~ ^$allowed+$ || ( $uri == 1 && $path =~ ^($allowed|%[[:xdigit:]]{2})+$ ) ]]; then
+        REPLY=$path; return
+    fi
+    # Android's C locale may still iterate multibyte characters. Read the
+    # original octets once for paths that actually need escaping.
+    hex=$(printf '%s' "$path" | od -An -v -tx1) || return 1
+    read -ra bytes <<< "${hex//$'\n'/ }"
+    REPLY=''
+    for ((i=0; i<${#bytes[@]}; i++)); do
+        printf -v char '%b' "\\x${bytes[i]}"
+        if [[ $char =~ ^$allowed$ ]]; then REPLY+=$char; continue; fi
+        if [[ $uri == 1 && $char == '%' ]] && ((i+2 < ${#bytes[@]})); then
+            printf -v escape '%b' "\\x${bytes[i+1]}\\x${bytes[i+2]}"
+            if [[ $escape =~ ^[[:xdigit:]]{2}$ ]]; then REPLY+="%$escape"; ((i+=2)); continue; fi
+        fi
+        REPLY+="%${bytes[i]^^}"
+    done
+}
+
 parse_url() {
-    local url=$1 rest authority path alias entry identity
-    PROTOCOL=local HOST='' OWNER='' REPO='' OWNED=false HOST_ICON='' SAFE_URL=$url
+    local url=$1 rest authority path alias entry identity parsed_host=0 uri=0
+    local authority_re='^(\[[[:xdigit:]:.]+\]|[a-zA-Z0-9._-]+)(:[0-9]+)?$'
+    local scp_re='^([^/@:]+@)?(\[[[:xdigit:]:.]+\]|[^/:@]+):([^:].*)$'
+    # Fragments and queries may contain credentials, including @ or slash.
+    url=${url%%\?*}; url=${url%%\#*}
+    PROTOCOL=local HOST='' OWNER='' REPO='' OWNED=false HOST_ICON='' SAFE_URL=$url HTTPS_URL=''
     if [[ $url =~ ^([a-zA-Z][a-zA-Z0-9+.-]*)://(.*)$ ]]; then
-        PROTOCOL=${BASH_REMATCH[1],,}; rest=${BASH_REMATCH[2]}
+        uri=1; PROTOCOL=${BASH_REMATCH[1],,}; rest=${BASH_REMATCH[2]}
         authority=${rest%%/*}; path=${rest#*/}; [[ $rest == */* ]] || path=''
         authority=${authority##*@}
         SAFE_URL="$PROTOCOL://$authority/$path"
         HOST=${authority%%:*}
         if [[ $authority == \[*\]* ]]; then HOST=${authority%%]*}; HOST+=']'; fi
-    elif [[ $url != /* && $url != ./* && $url != ../* && $url == *:* ]]; then
-        PROTOCOL=ssh; authority=${url%%:*}; HOST=${authority##*@}; path=${url#*:}
+        if [[ $authority =~ $authority_re ]]; then parsed_host=1; fi
+    elif [[ $url =~ ^([a-zA-Z][a-zA-Z0-9+.-]*):: ]]; then
+        # Remote helpers interpret their own payloads, including embedded secrets.
+        PROTOCOL=${BASH_REMATCH[1],,}; SAFE_URL="${BASH_REMATCH[1]}::"; path=''
+    elif [[ $url =~ $scp_re ]]; then
+        PROTOCOL=ssh; HOST=${BASH_REMATCH[2]}; path=${BASH_REMATCH[3]}
         SAFE_URL="$HOST:$path"
+        if [[ $HOST =~ $authority_re ]]; then parsed_host=1; fi
     else
         path=$url
     fi
-    # Query strings can contain credentials; never render them.
-    SAFE_URL=${SAFE_URL%%\?*}; SAFE_URL=${SAFE_URL%%\#*}
-    path=${path%%\?*}; path=${path%%\#*}; path=${path#/}; path=${path%/}
+    path=${path#/}; path=${path%/}
     HOST=${HOST,,}
     for entry in "${HOST_ALIASES[@]}"; do
         alias=${entry%%=*}
         [[ $HOST == "${alias,,}" ]] && HOST=${entry#*=}
     done
     HOST=${HOST,,}
+    if ((parsed_host && ${2:-0})) && [[ -n $path && $path != *[[:cntrl:]]* ]]; then
+        case $PROTOCOL in
+            ssh)
+                if [[ $HOST =~ $authority_re && -z ${BASH_REMATCH[2]} ]] && https_path "$path" "$uri"; then
+                    HTTPS_URL="https://$HOST/$REPLY"; fi ;;
+            https) HTTPS_URL=$SAFE_URL ;;
+        esac
+    fi
     REPO=${path##*/}; REPO=${REPO%.git}
     [[ $path == */* ]] && OWNER=${path%/*}
     case $HOST in github.com) HOST_ICON='󰊤' ;; gitlab.com) HOST_ICON='' ;; bitbucket.org) HOST_ICON='' ;; esac
@@ -160,12 +201,13 @@ inspect_json() {
 
 inspect_main() {
     declare -gA F=()
-    local key
+    local key project_https=0
     F[root]=$ROOT
     select_remote "$ROOT" || die 3 'requested remote does not exist'
-    parse_url "$URL"
+    if [[ $GET == https_url || $JSON == 1 || $FORMAT == *'{https_url}'* ]]; then project_https=1; fi
+    parse_url "$URL" "$project_https"
     if ((ICON)); then printf '%s' "$HOST_ICON"; ((NEWLINE)) && printf '\n'; return 0; fi
-    F[remote]=$REMOTE F[url]=$SAFE_URL F[protocol]=$PROTOCOL F[host]=$HOST
+    F[remote]=$REMOTE F[url]=$SAFE_URL F[https_url]=$HTTPS_URL F[protocol]=$PROTOCOL F[host]=$HOST
     F[owner]=$OWNER F[repo]=$REPO F[owned]=$OWNED F[icon]=$HOST_ICON
     # Single remote-field queries avoid ancestry discovery.
     if [[ -n $GET && -v F[$GET] ]]; then
@@ -179,14 +221,16 @@ inspect_main() {
         elif ((FORMAT_SET)); then render_format "$FORMAT"
         elif [[ $CMD == path ]]; then display "$ROOT"; printf '%s' "$REPLY"
         else
-            ui_heading "Repository ${ROOT##*/}"
+            ui_prepare
+            if [[ $OWNED == true ]]; then ui_git_style repo_owned; else ui_git_style repo; fi
+            ui_heading "Repository ${ROOT##*/}" "$REPLY"
             ui_field Root "$ROOT"
             ui_field Remote "$REMOTE"
             ui_field Host "$HOST"
             ui_field Owner "$OWNER"
             if [[ $OWNED == true ]]; then ui_field Ownership 'Matches configured owner'
             else ui_field Ownership 'No configured owner match'; fi
-            if ((VERBOSE)); then
+            if ((VERBOSE)) || [[ $UI_GIT_VIEW == verbose ]]; then
                 printf '\n'
                 ui_heading 'Remote details'
                 ui_field Repository "$REPO"

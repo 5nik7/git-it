@@ -1,9 +1,9 @@
-.TH GIT-IT 1 "September 28, 2026" "git-it 0.1.0" "User Commands"
+.TH GIT-IT 1 "November 23, 2026" "git-it 0.1.0" "User Commands"
 .SH NAME
 git-it \- inspect, synchronize, and publish Git repository trees
 .SH SYNOPSIS
 .B git-it
-.RI [ options ] " [info|path|sync|publish]" " [options]"
+.RI [ options ] " [info|path|status|sync|publish]" " [options]"
 .SH DESCRIPTION
 A Bash 5+ command for Termux and Linux. Inspection is local. Recursive
 operations
@@ -16,6 +16,13 @@ Show a local repository summary. This is the default command.
 .TP
 .B path
 Show the current root, or format verified repository ancestry.
+.TP
+.B status, -s, --status
+Report the selected worktree and registered submodules parent first.
+Group changed files by index and worktree state. Show cached tracking counts
+and both paths for renames or copies. Missing children make the report
+incomplete. Dirty worktrees and ordinary file conflicts are successful reports.
+Status does not fetch, initialize children or refresh the index.
 .TP
 .B sync
 Fetch and fast-forward the root upstream, then initialize and check out
@@ -30,11 +37,37 @@ destination and an attached, unambiguous upstream. Failed children block
 parents.
 .SH OPTIONS
 .TP
-.BI "-C " DIR
+.BI "-C, --directory " DIR
 Working directory.
 .TP
 .B -i, --icon
 Nerd Font host icon, independent of ownership. Empty output outside Git.
+.TP
+.B -o, --owner
+Print the complete remote namespace.
+.TP
+.B -H, --host
+Print the host.
+.TP
+.B -r, --repo
+Print the repository name.
+.TP
+.B -p, --protocol
+Print the transport protocol.
+.TP
+.B -R, --url
+Print the sanitized fetch URL.
+.TP
+.B --https
+Print the HTTPS form of the selected SSH or HTTPS URL. May be combined with
+-R. Retains the path, resolves configured SSH host aliases, and drops SSH
+ports. Local paths and unsupported transports produce an empty field.
+.TP
+.B --short, --view default|short|verbose
+Select the human status view. The verbose view adds metadata and status codes.
+.TP
+.B --full-paths
+Show absolute paths in human status reports.
 .TP
 .BI "--remote " NAME
 Inspection remote. With sync, --remote takes no argument and advances children
@@ -95,7 +128,7 @@ prompt formats, icons, field lists, version output and completion source are
 unchanged. There is no verbosity configuration key.
 .TP
 .B --no-progress
-Disable the terminal activity spinner for sync and publish.
+Disable terminal progress for status, sync, and publish.
 .TP
 .BI "--completion " bash|zsh|fish
 Generate completion source without reading a repository.
@@ -107,12 +140,13 @@ does not change global styles or require Dots.
 Print version.
 .TP
 .B -h, --help
-Print usage.
-Help does not load configuration; CLI color flags and NO_COLOR apply.
+Print usage with the current logo.txt header. The installed logo lives at
+share/git-it/logo.txt under the selected prefix.
+Help requires no Git repository.
 .SH HUMAN OUTPUT
-Headings and plans use cyan, successful outcomes green,
-warnings and cancellation
-yellow, and failures and blockers red. Text labels also identify each status.
+Human output follows the active Dots profile when available, including its help
+styles, Git and file colors, icons and layout.
+Standalone defaults apply elsewhere.
 Operations show the root once and relative descendant paths; a dot means the
 operation root. Routine successes use one line unless verbose output is enabled.
 .PP
@@ -124,16 +158,17 @@ completion, incomplete work, previews, and cancellation.
 Inspection describes ownership as a configured owner match, not proof of access.
 Absent metadata is displayed as Not configured.
 .PP
-Sync and publish show a delayed, colored spinner during Git fetch,
-initialization, update, checkout, commit and push steps. It indicates activity,
-not a completion percentage, and clears before results are printed.
+Status, sync and publish display delayed progress on stderr. A spinner marks
+active work and a bar shows progress when a count is known. The display
+clears before results and prompts.
 Both stdout and stderr must be terminals; TERM must be set and not dumb.
 JSON, dry runs and redirected output stay static even with --color always.
 The spinner also works in verbose mode. Color controls apply as usual;
 --no-color and NO_COLOR leave plain frames. Use --no-progress to disable
 animation, including for helpers that draw their own terminal interface.
 .SH FIELDS
-root, remote, url, protocol, host, owner, repo, owned, icon, current, parent,
+root, remote, url, https_url, protocol, host, owner, repo, owned, icon,
+current, parent,
 outermost, parent_dirname, parent_basename, submodule_prefix,
 submodule_basename,
 cwd_prefix, path_parent, path_outermost, chain_length, chain_repos,
@@ -186,6 +221,12 @@ intended actions; modified-file preservation warnings are always visible.
 Shell startup files are not edited. Install and uninstall accept --dry-run,
 --color auto|always|never and --no-color. Auto mode honors NO_COLOR.
 Uninstall removes unchanged managed files and preserves modified files.
+.PP
+Dots can run this same program via
+.B dots git it
+on Termux, Linux and WSL. Its setup includes the plugin when the recorded
+submodule is initialized. Use dots files install --with-source git-it to
+acquire it explicitly. The plugin starts in the caller's working directory.
 .SH SAFETY
 No automatic stash, reset, clean, force-push, or branch selection. Pinned
 checkout

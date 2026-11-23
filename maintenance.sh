@@ -45,8 +45,8 @@ maintenance_safe_path() {
 }
 maintenance_main() {
     local action=$1; shift
-    local dry=0 arg rel hash extra manifest temp='' interpreter mode i result=0 show_help=0
-    COLOR=auto JSON=0 VERBOSE=0
+    local dry=0 arg rel hash extra manifest temp='' interpreter mode i source_file result=0 show_help=0
+    COLOR=auto COLOR_SET=0 JSON=0 VERBOSE=0
     INSTALL_PREFIX=${PREFIX:-$HOME/.local}
     while (($#)); do
         arg=$1; shift
@@ -54,9 +54,9 @@ maintenance_main() {
             --prefix=*) INSTALL_PREFIX=${arg#*=} ;;
             -p|--prefix) (($#)) || maintenance_fail '--prefix requires a directory'; INSTALL_PREFIX=$1; shift ;;
             -n|--dry-run) dry=1 ;;
-            --color=*) COLOR=${arg#*=} ;;
-            --color) (($#)) || maintenance_fail '--color requires a policy'; COLOR=$1; shift ;;
-            --no-color) COLOR=never ;;
+            --color=*) COLOR=${arg#*=}; COLOR_SET=1 ;;
+            --color) (($#)) || maintenance_fail '--color requires a policy'; COLOR=$1; COLOR_SET=1; shift ;;
+            --no-color) COLOR=never; COLOR_SET=1 ;;
             -v|--verbose) VERBOSE=1 ;;
             -h|--help) show_help=1 ;;
             -V|--version) bash "$SOURCE_DIR/git-it" --version; return $? ;;
@@ -65,13 +65,16 @@ maintenance_main() {
     done
     case $COLOR in auto|always|never) ;; *) maintenance_fail 'color must be auto, always, or never' ;; esac
     colors
+    ui_prepare
     if ((show_help)); then
         ui_heading "git-it $action"
         printf '\n'
-        printf '%sUsage:%s bash %s.sh [--prefix DIR] [--dry-run]\n' "$CYAN" "$RESET" "$action"
-        printf '       [--color auto|always|never] [--no-color] [-v|--verbose]\n\n'
-        ui_field '--verbose' 'Show each managed file action'
-        ui_field '--dry-run' 'List intended actions without changing the prefix'
+        ui_help_span heading 'Usage:'; ui_help_syntax " bash $action.sh [--prefix DIR] [--dry-run]"
+        printf '\n'
+        ui_help_syntax '       [--color auto|always|never] [--no-color] [-v|--verbose]'
+        printf '\n\n'
+        ui_help_row '--verbose' 'Show each managed file action'
+        ui_help_row '--dry-run' 'List intended actions without changing the prefix'
         return 0
     fi
     [[ -n $INSTALL_PREFIX ]] || maintenance_fail 'empty prefix'
@@ -82,7 +85,9 @@ maintenance_main() {
     ui_field Prefix "$INSTALL_PREFIX"
     if ((dry)); then ui_field Preview 'No installation files will change'; fi
     printf '\n'
-    local -a paths=(bin/git-it lib/git-it/core.bash lib/git-it/inspect.bash lib/git-it/operations.bash lib/git-it/completion.bash share/man/man1/git-it.1 share/bash-completion/completions/git-it share/zsh/site-functions/_git-it share/fish/vendor_completions.d/git-it.fish)
+    local -a paths=(bin/git-it lib/git-it/{core,inspect,operations,completion,presentation,progress,git_views,status}.bash
+        share/git-it/logo.txt share/man/man1/git-it.1 share/bash-completion/completions/git-it
+        share/zsh/site-functions/_git-it share/fish/vendor_completions.d/git-it.fish)
     local -A allowed=() previous=()
     for rel in "${paths[@]}"; do allowed[$rel]=1; done
     manifest=$INSTALL_PREFIX/share/git-it/manifest
@@ -142,13 +147,20 @@ maintenance_main() {
     for ((i=0;i<${#paths[@]};i++)); do
         rel=${paths[i]}
         case $rel in
-            bin/git-it) { printf '#!%s\n' "$interpreter"; tail -n +2 "$SOURCE_DIR/git-it"; } > "$temp/$i" ;;
-            lib/git-it/*) cp -- "$SOURCE_DIR/lib/${rel##*/}" "$temp/$i" ;;
-            share/man/*) cp -- "$SOURCE_DIR/git-it.1" "$temp/$i" ;;
-            share/bash*) bash "$SOURCE_DIR/git-it" --completion bash > "$temp/$i" ;;
-            share/zsh*) bash "$SOURCE_DIR/git-it" --completion zsh > "$temp/$i" ;;
-            share/fish*) bash "$SOURCE_DIR/git-it" --completion fish > "$temp/$i" ;;
-        esac || maintenance_fail "cannot stage $rel"
+            bin/git-it) source_file=$SOURCE_DIR/git-it ;;
+            lib/git-it/*) source_file=$SOURCE_DIR/lib/${rel##*/} ;;
+            share/git-it/logo.txt) source_file=$SOURCE_DIR/logo.txt ;;
+            share/man/*) source_file=$SOURCE_DIR/git-it.1 ;;
+            share/bash*) source_file=$SOURCE_DIR/completion/bash ;;
+            share/zsh*) source_file=$SOURCE_DIR/completion/zsh ;;
+            share/fish*) source_file=$SOURCE_DIR/completion/fish ;;
+        esac
+        [[ -f $source_file && -r $source_file ]] || maintenance_fail "unreadable installation asset: $rel"
+        if [[ $rel == bin/git-it ]]; then
+            { printf '#!%s\n' "$interpreter"; tail -n +2 "$source_file"; } > "$temp/$i"
+        else
+            cp -- "$source_file" "$temp/$i"
+        fi || maintenance_fail "cannot stage $rel"
         checksum "$temp/$i" || maintenance_fail 'cannot hash staged file'
         printf '%s\t%s\n' "$DIGEST" "$rel" >> "$temp/manifest"
     done

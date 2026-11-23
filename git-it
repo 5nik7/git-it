@@ -14,12 +14,21 @@ export GIT_OPTIONAL_LOCKS=0
 readonly VERSION='0.1.0'
 # Installers place modules beside this launcher in ../lib/git-it.
 ENTRY=${BASH_SOURCE[0]}
-[[ $ENTRY == */* ]] || ENTRY=./$ENTRY
-BASE=$(cd -- "${ENTRY%/*}" && pwd -P) || exit 3
+case $ENTRY in /*|./*|../*) ;; *) ENTRY=./$ENTRY ;; esac
+while [[ -L $ENTRY ]]; do
+    # Plain readlink also works on BSD. Keep newlines in the target path.
+    LINK=$(readlink "$ENTRY" && printf .) || exit 3
+    LINK=${LINK%$'\n.'}
+    if [[ $LINK == /* ]]; then ENTRY=$LINK; else ENTRY=${ENTRY%/*}/$LINK; fi
+done
+BASE=$(cd -- "${ENTRY%/*}/" && pwd -P && printf .) || exit 3
+BASE=${BASE%$'\n.'}
 if [[ -f $BASE/lib/core.bash ]]; then
     LIB=$BASE/lib
+    DATA=$BASE
 else
     LIB=$BASE/../lib/git-it
+    DATA=$BASE/../share/git-it
 fi
 # shellcheck source=lib/core.bash
 source "$LIB/core.bash" || exit 3

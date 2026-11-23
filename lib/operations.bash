@@ -1,45 +1,8 @@
 # Ordered, incremental operations. Every failure is an explicit subtree result.
 # shellcheck disable=SC2034
 
-# Animate separately so Git stays in the foreground with its original stdin.
-# Only quiet commands belong here; events and confirmation prompts render after
-# the animation is stopped. No cursor hiding or terminal mode changes are used.
-progress_run() {
-    local label=$1 rc owner=$BASHPID
-    shift
-    if (( !JSON && !DRY_RUN && !NO_PROGRESS )) && [[ -t 1 && -t 2 && ${TERM:-dumb} != dumb ]]; then
-        display "$label"; label=$REPLY
-        PROGRESS_WIDTH=$((${#label} + 4))
-        (
-            trap - EXIT INT TERM
-            local sleeper='' frame=0
-            local -a frames=('|' '/' '-' $'\\') tints=('')
-            if color_enabled 1; then tints=("$CYAN" $'\e[34m' $'\e[35m' "$GREEN"); fi
-            trap 'if [[ -n $sleeper ]]; then kill "$sleeper" 2>/dev/null || :; wait "$sleeper" 2>/dev/null || :; fi; exit 0' TERM
-            while :; do
-                # Delay the first frame to avoid flashing for quick commands.
-                sleep 0.15 & sleeper=$!
-                wait "$sleeper" || exit 0
-                sleeper=''
-                kill -0 "$owner" 2>/dev/null || exit 0
-                printf '\r  %s%s%s %s' "${tints[frame % ${#tints[@]}]}" "${frames[frame % 4]}" "$RESET" "$label"
-                ((frame+=1))
-            done
-        ) </dev/null &
-        PROGRESS_PID=$!
-    fi
-    "$@" >/dev/null 2>&1; rc=$?
-    progress_stop
-    return "$rc"
-}
-
-progress_stop() {
-    [[ -n ${PROGRESS_PID:-} ]] || return 0
-    kill "$PROGRESS_PID" 2>/dev/null || :
-    wait "$PROGRESS_PID" 2>/dev/null || :
-    PROGRESS_PID=''
-    printf '\r%*s\r' "$PROGRESS_WIDTH" ''
-}
+# shellcheck source=lib/progress.bash
+source "${BASH_SOURCE[0]%/*}/progress.bash"
 
 event() {
     local dir=$1 state=$2 reason=$3 shown=$1 detail
@@ -49,13 +12,14 @@ event() {
     [[ $state != blocked && $state != failed ]] || RESULT=1
     [[ $state != cancelled ]] || CANCELLED=1
     if ((!JSON)); then
+        progress_stop
         if ((!VERBOSE)); then
             if [[ $dir == "$ROOT" ]]; then shown=.
             elif [[ $dir == "${ROOT%/}/"* ]]; then shown=${dir#"${ROOT%/}/"}; fi
         fi
-        if [[ $state == selected && $LAST_EVENT_DIR == "$dir" ]]; then
-            ui_detail "selected  $reason"
-        elif [[ $state == planned && $LAST_EVENT_DIR == "$dir" ]]; then
+        # Selected paths are grouped once the complete preview is available.
+        [[ $state != selected ]] || return 0
+        if [[ $state == planned && $LAST_EVENT_DIR == "$dir" ]]; then
             ui_detail "$reason"
         else
             ui_status "$state" "$shown"
@@ -72,6 +36,8 @@ event() {
 
 operations_heading() {
     ((JSON)) && return 0
+    ui_prepare
+    [[ $UI_GIT_VIEW != verbose ]] || VERBOSE=1
     ui_heading "${CMD^}"
     ui_field Root "$ROOT"
     if [[ $CMD == sync ]]; then
@@ -124,13 +90,21 @@ clean_own_files() {
 
 # Return all stage-zero gitlinks, independent of submodule.active filters.
 children() {
-    local dir=$1 row meta mode oid stage path
+    local dir=$1 purpose=${2:-operation} row meta mode oid stage path last_conflict=''
     CHILD_PATHS=(); CHILD_OIDS=()
     records_cmd git -C "$dir" ls-files --stage -z || return 1
     for row in "${RECORDS[@]}"; do
         meta=${row%%$'\t'*}; path=${row#*$'\t'}
         read -r mode oid stage <<< "$meta"
-        [[ $stage == 0 ]] || return 1
+        if [[ $stage != 0 ]]; then
+            [[ $purpose == status ]] || return 1
+            # Report ordinary conflicts through porcelain. An unresolved gitlink
+            # is listed once with an empty OID so status can report that child.
+            if [[ $mode == 160000 && $path != "$last_conflict" ]]; then
+                CHILD_PATHS+=("$path"); CHILD_OIDS+=(''); last_conflict=$path
+            fi
+            continue
+        fi
         if [[ $mode == 160000 ]]; then CHILD_PATHS+=("$path"); CHILD_OIDS+=("$oid"); fi
     done
 }
@@ -150,8 +124,9 @@ safe_child_path() {
     [[ $cursor == "$base/"* ]]
 }
 
-submodule_name() {
-    local dir=$1 path=$2 key value name='' count=0
+submodule_registrations() {
+    local dir=$1 purpose=${3:-operation} key value name
+    local -n name_map=$2
     local -a keys=()
     # Read keys and values separately: both subsection names and path values
     # can contain newlines, making config's key-newline-value output ambiguous.
@@ -159,12 +134,34 @@ submodule_name() {
     keys=("${RECORDS[@]}")
     for key in "${keys[@]}"; do
         records_cmd git -C "$dir" config --no-includes --null --file .gitmodules --get-all "$key" || return 1
-        ((${#RECORDS[@]} == 1)) || return 1
-        value=${RECORDS[0]}
-        if [[ $value == "$path" ]]; then name=${key#submodule.}; name=${name%.path}; ((count+=1)); fi
+        if ((${#RECORDS[@]} != 1)); then
+            [[ $purpose == status ]] || return 1
+            # Each claimed path is ambiguous, even if another key also names
+            # it. Unrelated siblings can still be inspected.
+            for value in "${RECORDS[@]}"; do
+                # shellcheck disable=SC2004
+                [[ ! $value ]] || name_map[$value]=''
+            done
+            continue
+        fi
+        value=${RECORDS[0]}; [[ -n $value ]] || continue
+        name=${key#submodule.}; name=${name%.path}
+        # name_map is a reference to an associative array. Empty means more
+        # than one registration claims the same indexed path.
+        # shellcheck disable=SC2004
+        if [[ ${name_map[$value]+set} ]]; then name_map[$value]=''
+        else name_map[$value]="=$name"; fi
     done
-    ((count == 1)) || return 1
-    REPLY=$name
+    return 0
+}
+
+submodule_name() {
+    local dir=$1 path=$2
+    local -A by_path=()
+    submodule_registrations "$dir" by_path || return 1
+    REPLY=${by_path[$path]-}
+    [[ -n $REPLY ]] || return 1
+    REPLY=${REPLY#=}
 }
 
 upstream() {
@@ -208,9 +205,12 @@ safe_topology() {
 sync_children() {
     local dir=$1 i path oid child
     local -a paths=() oids=()
+    local progress_completed=0 progress_total=0
     children "$dir" || { event "$dir" blocked 'cannot enumerate a conflict-free submodule index'; return 1; }
     paths=("${CHILD_PATHS[@]}"); oids=("${CHILD_OIDS[@]}")
+    progress_total=${#paths[@]}
     for ((i=0;i<${#paths[@]};i++)); do
+        progress_completed=$i
         path=${paths[i]}; oid=${oids[i]}; child=$dir/$path
         if ! safe_child_path "$dir" "$path" || [[ -L $child/.git ]] || ! submodule_name "$dir" "$path"; then
             event "$child" blocked 'unsafe path or missing/ambiguous .gitmodules entry'; continue
@@ -233,6 +233,11 @@ sync_node() {
     local dir=$1 pinned=${2:-} parent=${3:-} path=${4:-} before target name branch remote ref tracking attached=0
     [[ ! -v VISITED[$dir] ]] || { event "$dir" blocked 'repeated repository in traversal'; return 1; }
     VISITED[$dir]=1
+    # The root has three local stages. Once children are enumerated their
+    # parent supplies an actual sibling count for recursive activity.
+    local count_stages=0 progress_completed=${progress_completed:-0} progress_total=${progress_total:-0}
+    if ((!progress_total)); then count_stages=1; progress_total=3; fi
+    progress_start 'Checking repository' "$progress_completed" "$progress_total"
     lock_repo "$dir" || return 1
     if ! clean_own_files "$dir"; then event "$dir" blocked 'local edits, staged changes, untracked files, or an operation in progress'; return 1; fi
     text_cmd git -C "$dir" rev-parse --verify HEAD || { event "$dir" blocked 'repository has no commit'; return 1; }; before=$REPLY
@@ -259,6 +264,8 @@ sync_node() {
         else event "$dir" planned "check out parent-recorded commit $pinned; missing objects may need download"; fi
         sync_children "$dir"; return 0
     fi
+    ((count_stages == 0)) || progress_completed=1
+    progress_stop
     if [[ -z $pinned || $ADVANCE == 1 ]]; then
         if ! fetch_branch "$dir" "$remote" "$ref" "$tracking"; then event "$dir" failed 'fetch failed; check upstream, credentials, or rewritten remote history'; return 1; fi
         text_cmd git -C "$dir" rev-parse --verify "$tracking^{commit}" || return 1; target=$REPLY
@@ -271,6 +278,8 @@ sync_node() {
             fi
         fi
     fi
+    ((count_stages == 0)) || progress_completed=2
+    progress_start 'Checking update' "$progress_completed" "$progress_total"
     # Fetch can invoke credential helpers; recheck worktree state afterwards.
     if ! clean_own_files "$dir" || ! text_cmd git -C "$dir" rev-parse HEAD || [[ $REPLY != "$before" ]]; then
         event "$dir" blocked 'repository changed during fetch'; return 1
@@ -399,14 +408,20 @@ publish_preview() {
         return 0
     fi
     records_cmd git -C "$dir" status --porcelain=v1 -z --untracked-files=all || return 1
-    local skip=0
-    for row in "${RECORDS[@]}"; do
-        if ((skip)); then skip=0; continue; fi
-        [[ ${row:0:2} != *R* && ${row:0:2} != *C* ]] || skip=1
-        if ((ALL)) || [[ ${row:0:1} != ' ' && ${row:0:1} != '?' ]]; then
-            event "$dir" selected "${row:0:2} ${row:3}"
+    local i xy path old view=${UI_GIT_VIEW:-default} FULL_PATHS=0
+    local -a paths=() codes=() oldpaths=()
+    for ((i=0;i<${#RECORDS[@]};i++)); do
+        row=${RECORDS[i]}; xy=${row:0:2}; path=${row:3}; old=''
+        if [[ $xy == *[RC]* ]]; then ((i+=1)); old=${RECORDS[i]}; fi
+        if ((ALL)) || [[ ${xy:0:1} != ' ' && ${xy:0:1} != '?' ]]; then
+            event "$dir" selected "$xy $path"
+            if ((!JSON)); then paths+=("$path"); codes+=("$xy"); oldpaths+=("$old"); fi
         fi
     done
+    if ((!JSON)); then
+        ((VERBOSE == 0)) || view=verbose
+        status_files "$dir"
+    fi
     event "$dir" planned 'successfully published child pointers may also be staged; remote state requires fetch'
 }
 
@@ -478,7 +493,8 @@ publish_node() {
 operations_main() {
     EVENT_DIRS=(); EVENT_STATES=(); EVENT_REASONS=(); LOCKS=(); PUB_DIRS=(); RESULT=0; PUBLISH_CANDIDATES=0
     CANCELLED=0 LAST_EVENT_DIR='' OP_PHASE=execution
-    PROGRESS_PID='' PROGRESS_WIDTH=0
+    PROGRESS_PID='' PROGRESS_FD=''
+    local progress_completed=0 progress_total=0
     if ((DRY_RUN)) || [[ $CMD == publish ]]; then OP_PHASE=preview; fi
     declare -gA HELD=() VISITED=() BLOCKED=() SNAPSHOTS=() PARENT=() EXPECTED=()
     declare -gA PREVIEW_DEST=() PREVIEW_REF=() PREVIEW_REMOTE=() PREVIEW_BRANCH=()
@@ -489,11 +505,18 @@ operations_main() {
     operations_heading
     if [[ $CMD == sync ]]; then sync_node "$ROOT" || RESULT=1
     else
+        if ((!JSON)); then
+            # Shared counted file groups for status and publish previews.
+            # shellcheck source=lib/git_views.bash
+            source "$LIB/git_views.bash"
+        fi
         command -v sha256sum >/dev/null 2>&1 || die 3 'publishing requires sha256sum'
         if [[ -z $MESSAGE ]]; then
             text_cmd date -u '+%Y-%m-%d %H:%M UTC'; MESSAGE="Sync via ${HOSTNAME:-unknown} on $REPLY"
         fi
+        progress_start 'Discovering repositories'
         collect_publish "$ROOT" || RESULT=1
+        progress_stop
         local dir parent answer
         for dir in "${PUB_DIRS[@]}"; do publish_preview "$dir"; done
         if ((!DRY_RUN && PUBLISH_CANDIDATES > 0)); then
@@ -512,6 +535,7 @@ operations_main() {
             fi
             OP_PHASE=execution LAST_EVENT_DIR=''
             if ((!JSON)); then printf '\n'; ui_heading Publishing; fi
+            progress_total=${#PUB_DIRS[@]}
             for dir in "${PUB_DIRS[@]}"; do
                 parent=${PARENT[$dir]}
                 # Validate parent BEFORE permitting the known child-induced change.
@@ -523,6 +547,7 @@ operations_main() {
                 if ! publish_node "$dir"; then
                     RESULT=1; [[ -z $parent ]] || BLOCKED[$parent]=1
                 fi
+                ((progress_completed+=1))
             done
         fi
     fi
@@ -531,6 +556,7 @@ operations_main() {
 }
 
 operations_report() {
+    progress_stop
     local i comma=''
     if ((JSON)); then
         printf '{"complete":'; if ((RESULT)); then printf false; else printf true; fi

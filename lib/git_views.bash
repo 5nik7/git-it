@@ -23,12 +23,12 @@ status_group() {
     esac
     case $xy in
         *U*|AA|DD) group_role=conflict; group_icon='' ;;
-        '??') group_role=untracked; group_icon='' ;;
+        '??') group_role=untracked; group_icon='' ;;
         '!!') group_role=ignored; group_icon='' ;;
-        *D*) group_role=deleted; group_icon='󰆴' ;;
+        *D*) group_role=deleted; group_icon='' ;;
         *R*) group_role=renamed; group_icon='' ;;
         *C*) group_role=copied; group_icon='' ;;
-        *A*) group_role=added; group_icon='󰐕' ;;
+        *A*) group_role=added; group_icon='' ;;
         *T*) group_role=type_changed; group_icon='󰑓' ;;
         *) group_role=modified; group_icon='' ;;
     esac

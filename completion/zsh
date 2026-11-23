@@ -10,8 +10,32 @@ _git_it() {
         case $word in
             -C|--directory|--config|--color|--get|--format|-f|--message|-m|--completion|--view) value=1 ;;
             --remote) [[ $cmd == sync ]] || value=1 ;;
-            -s|--status) cmd=status; command_option=$word ;;
+            -s|--status) if [[ -z $cmd ]]; then cmd=status; command_option=$word; fi ;;
             --sync) cmd=sync; command_option=$word ;;
+            wiki|submodule|submodules)
+                local row kind candidate description role
+                local -a commands options values input
+                input=("${(@Q)words[2,CURRENT]}")
+                input[-1]=$PREFIX
+                for row in "${(@f)$(command git-it __complete-scope "${input[@]}" 2>/dev/null)}"; do
+                    IFS=$'\t' read -r kind candidate description role <<< "$row"
+                    case $kind in
+                        directory) _directories; return ;;
+                        file) _files; return ;;
+                        candidate)
+                            candidate=${candidate//\\/\\\\}
+                            candidate=${candidate//:/\\:}
+                            case $role in
+                                command) commands+=("$candidate:$description") ;;
+                                option) options+=("$candidate:$description") ;;
+                                value) values+=("$candidate:$description") ;;
+                            esac ;;
+                    esac
+                done
+                (( ${#commands} )) && _describe -t commands 'command' commands
+                (( ${#options} )) && _describe -t options 'option' options
+                (( ${#values} )) && _describe -t values 'value' values
+                return 0 ;;
             info|path|status|sync|publish) cmd=$word ;;
         esac
     done
@@ -46,11 +70,15 @@ _git_it() {
             '--remote[Choose inspection remote]:remote name:'
         )
     elif [[ $cmd == sync ]]; then
-        args+=('--remote[Advance configured submodule branches]')
+        args+=('--remote[Advance configured submodule branches]' '--init[Permit initializing missing submodules]')
     fi
-    if [[ -z $cmd || $cmd == status ]]; then
-        args+=('--view[Choose status view]:view:(default short verbose)'
+    if [[ $cmd != path ]]; then
+        args+=('--no-wiki[Exclude the associated wiki]'
+               '--view[Choose status view]:view:(default short verbose)'
                '--short[Use compact status view]' '--full-paths[Show absolute paths]')
+    fi
+    if [[ -n $cmd && $cmd != path && $command_option != -s ]]; then
+        args+=('-s[Use compact output]')
     fi
     if [[ -z $cmd || $cmd == status || $cmd == sync || $cmd == publish ]]; then
         args+=('--outermost[Start at verified outermost parent]')
@@ -64,7 +92,12 @@ _git_it() {
     fi
     _arguments "${args[@]}"
     if [[ $state == command ]]; then
-        local -a commands=(info path status sync publish)
+        local -a commands=(
+            'info:Show repository metadata' 'path:Show repository paths'
+            'status:Show working tree changes' 'sync:Synchronize the repository tree'
+            'publish:Preview and publish changes' 'submodule:Select a registered child by name'
+            'submodules:Inspect registered descendants' 'wiki:Inspect the associated wiki'
+        )
         _describe -t commands 'command' commands
     fi
 }

@@ -3,20 +3,15 @@
 git-it \- inspect, synchronize, and publish Git repository trees
 .SH SYNOPSIS
 .B git-it
-.RI [ options ] " [info|path|status|sync|publish]" " [options]"
+.RI [ options ] " [command]" " [options]"
 .SH DESCRIPTION
 A Bash 5+ command for Termux and Linux. Inspection is local. Recursive
 operations
 follow registered submodules. Completed work is retained after partial
 failure.
 .PP
-With no command, show repository info followed by a status section for local
-changes in the worktree and its registered submodules.
-Clean repositories are omitted from that section.
-Missing or unreadable children appear and give exit status 1.
-Branch divergence alone leaves the worktree clean.
-Directory and presentation options also select this default.
-Outside a worktree it prints a diagnostic and usage to stderr and exits 3.
+With no command, print usage. Outside a worktree also print a warning and
+usage to stderr and exit 3. Explicit --help succeeds in any directory.
 .SH COMMANDS
 .TP
 .B info
@@ -33,16 +28,27 @@ incomplete. Dirty worktrees and ordinary file conflicts are successful reports.
 Status does not fetch, initialize children or refresh the index.
 .TP
 .B sync
-Fetch and fast-forward the root upstream, then initialize and check out
-recorded
-submodule commits, parent before children. Safe siblings continue after
-blockers.
+Fetch and fast-forward the root upstream, then check out recorded submodule
+commits, parent before children. Use --init to initialize missing children.
+Safe siblings continue after blockers.
 .TP
 .B publish
 Preview, confirm, commit and push, children before parents. Defaults to staged
 changes and successfully published child pointers. Publication needs an owned
 destination and an attached, unambiguous upstream. Failed children block
 parents.
+.TP
+.B submodule NAME [ACTION]
+Select a registered child by name. Actions include info, status and publish.
+.TP
+.B submodules [ACTION] [PATH]
+Inspect registered descendants, limit the tree with --depth N, or review
+publication of one registered path or all direct submodules.
+.TP
+.B wiki [info|status|sync|publish]
+Select the declared Wiki or a sibling checkout with a matching Wiki remote.
+An inferred sibling participates in top-level inspection. Select its Wiki
+command explicitly for synchronization or publication.
 .SH OPTIONS
 .TP
 .BI "-C, --directory " DIR
@@ -71,7 +77,7 @@ Print the HTTPS form of the selected SSH or HTTPS URL. May be combined with
 -R. Retains the path, resolves configured SSH host aliases, and drops SSH
 ports. Local paths and unsupported transports produce an empty field.
 .TP
-.B --short, --view default|short|verbose
+.B -s, --short, --view default|short|verbose
 Select the human status view. The verbose view adds metadata and status codes.
 .TP
 .B --full-paths
@@ -99,6 +105,12 @@ Suppress the final inspection newline.
 .TP
 .B --outermost
 Start operations at the outermost verified parent instead of the current repo.
+.TP
+.B --init
+Allow sync to initialize missing registered submodules.
+.TP
+.B --no-wiki
+Exclude the associated Wiki from a top-level command.
 .TP
 .B --dry-run
 Local preview with no network or repository writes. Remote state is unknown.
@@ -157,6 +169,8 @@ styles, Git and file colors, icons and layout.
 Standalone defaults apply elsewhere.
 Human info and status abbreviate home paths using a tilde.
 Use status --full-paths for literal absolute paths.
+Default info and status start with the root metadata box and compact repository
+rows. Status groups files by their complete index and worktree state.
 Operations show the root once and relative descendant paths; a dot means the
 operation root. Routine successes use one line unless verbose output is enabled.
 .PP

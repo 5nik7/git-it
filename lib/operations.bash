@@ -37,6 +37,7 @@ event() {
 operations_heading() {
     ((JSON)) && return 0
     ui_prepare
+    UI_GIT_VIEW=${STATUS_VIEW:-$UI_GIT_VIEW}
     [[ $UI_GIT_VIEW != verbose ]] || VERBOSE=1
     ui_heading "${CMD^}"
     ui_field Root "$ROOT"
@@ -206,6 +207,9 @@ sync_children() {
     local dir=$1 i path oid child
     local -a paths=() oids=()
     local progress_completed=0 progress_total=0
+    if [[ -L $dir/.gitmodules || ( -e $dir/.gitmodules && ! -f $dir/.gitmodules ) ]]; then
+        event "$dir" blocked 'unsafe submodule registration file'; return 1
+    fi
     children "$dir" || { event "$dir" blocked 'cannot enumerate a conflict-free submodule index'; return 1; }
     paths=("${CHILD_PATHS[@]}"); oids=("${CHILD_OIDS[@]}")
     progress_total=${#paths[@]}
@@ -216,6 +220,7 @@ sync_children() {
             event "$child" blocked 'unsafe path or missing/ambiguous .gitmodules entry'; continue
         fi
         if ! repo_root "$child" || [[ $REPLY != "$child" ]]; then
+            if ((!INIT)); then event "$child" blocked 'not initialized; use sync --init to permit downloading this submodule'; continue; fi
             if ((DRY_RUN)); then event "$child" planned 'initialize at recorded commit; deeper structure requires download'; continue; fi
             # Refuse to adopt any nonempty directory, including hidden files.
             if [[ -d $child ]] && [[ -n $(find "$child" -mindepth 1 -maxdepth 1 -print -quit) ]]; then
@@ -281,6 +286,7 @@ sync_node() {
     ((count_stages == 0)) || progress_completed=2
     progress_start 'Checking update' "$progress_completed" "$progress_total"
     # Fetch can invoke credential helpers; recheck worktree state afterwards.
+    if [[ $dir == "$WIKI_ROOT" ]] && ! wiki_recheck; then event "$dir" blocked 'wiki association changed during fetch'; return 1; fi
     if ! clean_own_files "$dir" || ! text_cmd git -C "$dir" rev-parse HEAD || [[ $REPLY != "$before" ]]; then
         event "$dir" blocked 'repository changed during fetch'; return 1
     fi
@@ -333,11 +339,11 @@ collect_publish() {
     [[ ! -v VISITED[$dir] ]] || { event "$dir" blocked 'repeated repository'; return 1; }
     VISITED[$dir]=1; PARENT[$dir]=$parent
     lock_repo "$dir" || { BLOCKED[$dir]=1; return 1; }
-    if ! children "$dir"; then BLOCKED[$dir]=1; event "$dir" blocked 'conflicted index'; return 1; fi
+    if [[ -L $dir/.gitmodules || ( -e $dir/.gitmodules && ! -f $dir/.gitmodules ) ]] || ! children "$dir"; then BLOCKED[$dir]=1; event "$dir" blocked 'conflicted index'; return 1; fi
     paths=("${CHILD_PATHS[@]}")
     for path in "${paths[@]}"; do
         child=$dir/$path
-        if ! safe_child_path "$dir" "$path" || [[ -L $child/.git ]] || ! repo_root "$child" || [[ $REPLY != "$child" ]]; then
+        if ! safe_child_path "$dir" "$path" || ! submodule_name "$dir" "$path" || [[ -L $child/.git ]] || ! repo_root "$child" || [[ $REPLY != "$child" ]]; then
             BLOCKED[$dir]=1; event "$child" blocked 'initialize the submodule before recursive publication'; continue
         fi
         collect_publish "$child" "$dir" || BLOCKED[$dir]=1
@@ -358,6 +364,10 @@ publish_destination() {
     [[ -n $REPLY && $REPLY != *$'\n'* ]] || return 1
     row=$REPLY; parse_url "$row"
     [[ $OWNED == true ]] || return 1
+    if [[ $dir == "$WIKI_ROOT" && $WIKI_ONLY == 1 && $WIKI_DECLARED == 0 ]]; then
+        scope_wiki_url_matches "$WIKI_SOURCE" "$row" || return 1
+        parse_url "$row"
+    fi
     PUSH_URL=$row
 }
 
@@ -408,7 +418,7 @@ publish_preview() {
         return 0
     fi
     records_cmd git -C "$dir" status --porcelain=v1 -z --untracked-files=all || return 1
-    local i xy path old view=${UI_GIT_VIEW:-default} FULL_PATHS=0
+    local i xy path old view=${STATUS_VIEW:-${UI_GIT_VIEW:-default}}
     local -a paths=() codes=() oldpaths=()
     for ((i=0;i<${#RECORDS[@]};i++)); do
         row=${RECORDS[i]}; xy=${row:0:2}; path=${row:3}; old=''
@@ -428,6 +438,7 @@ publish_preview() {
 publish_node() {
     local dir=$1 parent=${PARENT[$1]} remote ref tracking before destination path child index head old row meta
     [[ ! -v BLOCKED[$dir] ]] || { event "$dir" blocked 'a required child or preflight check failed'; return 1; }
+    if ! scope_still_registered "$dir"; then event "$dir" blocked 'registered scope changed after preview'; return 1; fi
     if ! fingerprint "$dir" || [[ $REPLY != "${SNAPSHOTS[$dir]}" ]]; then
         event "$dir" blocked 'publish inputs changed after preview'; return 1
     fi
@@ -448,9 +459,12 @@ publish_node() {
     if ! git -C "$dir" merge-base --is-ancestor "$tracking" HEAD; then
         event "$dir" blocked 'remote is ahead or diverged; sync or resolve manually before publishing'; return 1
     fi
-    if ! fingerprint "$dir" || [[ $REPLY != "${SNAPSHOTS[$dir]}" ]] || ! publish_destination "$dir" ||
+    if ! scope_still_registered "$dir" || ! fingerprint "$dir" || [[ $REPLY != "${SNAPSHOTS[$dir]}" ]] || ! publish_destination "$dir" ||
        [[ $PUSH_URL != "$destination" || $UP_REF != "$ref" || $UP_REMOTE != "$remote" || $BRANCH != "${PREVIEW_BRANCH[$dir]}" ]]; then
         event "$dir" blocked 'inputs or destination changed during preflight'; return 1
+    fi
+    if [[ $dir == "$WIKI_ROOT" ]] && ! wiki_publish_check recheck; then
+        event "$dir" blocked 'wiki verification changed during preflight'; return 1
     fi
     if ((ALL)); then
         git -C "$dir" add --all -- . >/dev/null 2>&1 || { event "$dir" failed 'staging failed; inspect index'; return 1; }
@@ -490,6 +504,43 @@ publish_node() {
     fi
 }
 
+# Recheck the selected scope before any operation that can contact a remote.
+wiki_recheck() {
+    [[ -n $WIKI_ROOT ]] || return 0
+    if ((WIKI_DECLARED)); then
+        local path digest
+        text_cmd python3 -IB "$LIB/wiki_scope.py" checkout "$WIKI_SOURCE" && path=$REPLY &&
+            [[ $path == "$WIKI_ROOT" ]] && text_cmd python3 -IB "$LIB/wiki_scope.py" digest "$WIKI_SOURCE" &&
+            digest=$REPLY && [[ $digest == "$WIKI_DIGEST" ]] && repo_root "$path" && [[ $REPLY == "$path" ]]
+    else scope_sibling_matches "$WIKI_SOURCE" "$WIKI_ROOT"; fi
+}
+
+wiki_publish_check() {
+    local phase=$1 source_revision wiki_revision=':'
+    wiki_recheck || return 1
+    ((WIKI_DECLARED)) || return 0
+    upstream "$WIKI_SOURCE" || return 1
+    if ((ALL)); then wiki_revision=''; fi
+    source_revision=$wiki_revision
+    if ((WIKI_ONLY)) || [[ $phase == execute || $phase == recheck ]]; then
+        if [[ $phase == execute ]]; then fetch_branch "$WIKI_SOURCE" "$UP_REMOTE" "$UP_REF" "$TRACKING" || return 1; fi
+        source_revision=$TRACKING
+    fi
+    python3 -IB "$LIB/wiki_scope.py" verify "$WIKI_SOURCE" "$WIKI_ROOT" "$WIKI_DIGEST" "$UP_REF" "$source_revision" "$wiki_revision"
+}
+
+operation_root_available() {
+    local dir=$1
+    if [[ $dir == "$WIKI_ROOT" ]]; then
+        if [[ ! -e $dir && $WIKI_ONLY == 0 ]]; then event "$dir" skipped 'declared wiki checkout is missing'; return 1; fi
+        if ! wiki_recheck; then event "$dir" blocked 'wiki association changed or checkout unavailable'; return 1; fi
+    fi
+    if [[ -L $dir/.git ]] || ! repo_root "$dir" || [[ $REPLY != "$dir" ]] || ! scope_still_registered "$dir"; then
+        event "$dir" blocked 'selected repository unavailable'; return 1
+    fi
+    return 0
+}
+
 operations_main() {
     EVENT_DIRS=(); EVENT_STATES=(); EVENT_REASONS=(); LOCKS=(); PUB_DIRS=(); RESULT=0; PUBLISH_CANDIDATES=0
     CANCELLED=0 LAST_EVENT_DIR='' OP_PHASE=execution
@@ -501,9 +552,18 @@ operations_main() {
     trap cleanup_locks EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM
-    if ((OUTERMOST)); then ancestry; ROOT=${CHAIN[0]}; fi
+    local selected dir parent answer
+    if ((WIKI_DECLARED)); then
+        text_cmd python3 -IB "$LIB/wiki_scope.py" digest "$WIKI_SOURCE" || die 3 'invalid wiki declaration'
+        WIKI_DIGEST=$REPLY
+    fi
     operations_heading
-    if [[ $CMD == sync ]]; then sync_node "$ROOT" || RESULT=1
+    if [[ $CMD == sync ]]; then
+        for selected in "${OP_ROOTS[@]}"; do
+            if ((RESULT)) && [[ $selected == "$WIKI_ROOT" ]]; then event "$selected" blocked 'source synchronization failed'; continue; fi
+            operation_root_available "$selected" || continue
+            sync_node "$selected" || RESULT=1
+        done
     else
         if ((!JSON)); then
             # Shared counted file groups for status and publish previews.
@@ -515,9 +575,15 @@ operations_main() {
             text_cmd date -u '+%Y-%m-%d %H:%M UTC'; MESSAGE="Sync via ${HOSTNAME:-unknown} on $REPLY"
         fi
         progress_start 'Discovering repositories'
-        collect_publish "$ROOT" || RESULT=1
+        for selected in "${OP_ROOTS[@]}"; do
+            operation_root_available "$selected" || continue
+            if [[ $selected == "$WIKI_ROOT" ]] && ! wiki_publish_check preview; then
+                event "$selected" blocked 'cannot verify selected wiki content or source association'
+                operations_report; return 1
+            fi
+            collect_publish "$selected" || RESULT=1
+        done
         progress_stop
-        local dir parent answer
         for dir in "${PUB_DIRS[@]}"; do publish_preview "$dir"; done
         if ((!DRY_RUN && PUBLISH_CANDIDATES > 0)); then
             if ((!YES)); then
@@ -538,6 +604,11 @@ operations_main() {
             progress_total=${#PUB_DIRS[@]}
             for dir in "${PUB_DIRS[@]}"; do
                 parent=${PARENT[$dir]}
+                if [[ -n $WIKI_ROOT && ( $dir == "$WIKI_ROOT" || $dir == "$WIKI_ROOT/"* ) ]]; then
+                    if ((RESULT)) || ! wiki_publish_check execute; then
+                        event "$dir" blocked 'source publication failed or wiki verification changed'; continue
+                    fi
+                fi
                 # Validate parent BEFORE permitting the known child-induced change.
                 if [[ -n $parent ]]; then
                     if ! fingerprint "$parent" || [[ $REPLY != "${SNAPSHOTS[$parent]}" ]]; then
@@ -550,6 +621,15 @@ operations_main() {
                 ((progress_completed+=1))
             done
         fi
+    fi
+    if [[ $CMD == publish ]] && ((!DRY_RUN && !CANCELLED)); then
+        for selected in "${OP_ROOTS[@]}"; do
+            parent=${SELECTED_PARENTS[$selected]-}
+            if [[ -n $parent ]] && scope_still_registered "$selected" &&
+               ! git -C "$parent" diff --quiet --ignore-submodules=dirty -- ":(literal)${selected#"$parent"/}"; then
+                event "$parent" pending "review the updated submodule pointer: ${selected#"$parent"/}"
+            fi
+        done
     fi
     operations_report
     return "$RESULT"

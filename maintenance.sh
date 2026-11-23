@@ -85,7 +85,7 @@ maintenance_main() {
     ui_field Prefix "$INSTALL_PREFIX"
     if ((dry)); then ui_field Preview 'No installation files will change'; fi
     printf '\n'
-    local -a paths=(bin/git-it lib/git-it/{core,inspect,operations,completion,presentation,progress,git_views,status}.bash
+    local -a paths=(bin/git-it lib/git-it/{core,inspect,operations,completion,presentation,progress,git_views,status,scope}.bash lib/git-it/wiki_scope.py
         share/git-it/logo.txt share/man/man1/git-it.1 share/bash-completion/completions/git-it
         share/zsh/site-functions/_git-it share/fish/vendor_completions.d/git-it.fish)
     local -A allowed=() previous=()

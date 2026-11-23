@@ -91,7 +91,7 @@ class CliTest(unittest.TestCase):
     def test_selector_conflicts(self):
         for args in (('-o', '-p'), ('-R', '--json'), ('--https', '--repo'),
                      ('--https', '-f', '{url}'), ('sync', '--owner'), ('publish', '-R'),
-                     ('status', '--url'), ('info', '--view', 'short'), ('publish', '--short'),
+                     ('status', '--url'), ('path', '--view', 'short'), ('publish', '--init'),
                      ('status', '--view=default', '-v'), ('-s', '--short', '--verbose'),
                      ('-s', '-n'), ('--owner=info',), ('sync', '--remote=--dry-run')):
             with self.subTest(args=args):
@@ -157,23 +157,32 @@ class CliTest(unittest.TestCase):
         self.assertEqual(output.stdout, (relocated/'completion/bash').read_text())
 
     def test_completion_contexts(self):
+        env = dict(self.fixture.env, PATH=str(fixtures.PROJECT) + os.pathsep + self.fixture.env['PATH'])
+        self.fixture.sub(self.repo, self.fixture.repo('completion child'), 'plugins/child')
         for words, expected, missing in (
             (['status', '--view', 'sh'], 'short', '--https'), (['-s', '--fu'], '--full-paths', '--host'),
-            (['path', '--get', 'htt'], 'https_url', 'url'), (['info', '--'], '--https', '--short'),
+            (['path', '--get', 'htt'], 'https_url', 'url'), (['info', '--'], '--https', '--init'),
             (['sync', '--remote', '--'], '--dry-run', '--https'),
             (['publish', '--'], '--all', '--https'),
+            (['wiki', ''], 'status', 'path'),
+            (['wiki', 'sync', '--'], '--init', '--no-wiki'),
+            (['submodule', ''], 'child', 'plugins/child'),
+            (['submodule', 'child', ''], 'submodules', 'sync'),
+            (['submodules', 'status', 'plugins/'], 'plugins/child', 'child'),
+            (['submodules', 'info', '--'], '--depth', '--all-submodules'),
+            (['submodules', 'publish', '--'], '--all-submodules', '--init'),
         ):
             with self.subTest(words=words):
                 result = self.fixture.run_cmd(['bash', '-c',
                     'source "$1"; shift; COMP_WORDS=(git-it "$@"); COMP_CWORD=$#; '
                     '_git_it; printf "%s\\n" "${COMPREPLY[@]}"',
-                    'complete', str(fixtures.PROJECT/'completion/bash'), *words])
+                    'complete', str(fixtures.PROJECT/'completion/bash'), *words], cwd=self.repo, env=env)
                 self.assertIn(expected, result.stdout.splitlines())
                 self.assertNotIn(missing, result.stdout.splitlines())
                 if shutil.which('fish'):
                     result = self.fixture.run_cmd(['fish', '--no-config', '-c',
                         'source $argv[1]; complete -C $argv[2]', str(fixtures.PROJECT/'completion/fish'),
-                        'git-it ' + ' '.join(words)])
+                        'git-it ' + ' '.join(words)], cwd=self.repo, env=env)
                     values = [line.partition('\t')[0] for line in result.stdout.splitlines()]
                     self.assertIn(expected, values)
                     self.assertNotIn(missing, values)

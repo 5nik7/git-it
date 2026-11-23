@@ -138,7 +138,7 @@ printf '%s\n' "${COMPREPLY[@]}"
 ''', 'fixture', str(completion)])
         commands = {word for word in other.stdout.splitlines() if not word.startswith('-')}
         self.assertEqual({word for _, word in rows}, commands)
-        self.assertEqual(commands, {'info', 'path', 'status', 'sync', 'publish'})
+        self.assertEqual(commands, {'info', 'path', 'status', 'sync', 'publish', 'wiki', 'submodule', 'submodules'})
 
     def test_icon_outside_repo_is_empty(self):
         self.assertEqual(self.cli(self.base, "-i").stdout, "")
@@ -235,7 +235,7 @@ printf '%s\n' "${COMPREPLY[@]}"
         self.git(source, "submodule", "add", "--name", "special", "--", str(child_bare), path)
         self.git(source, "commit", "-am", "add specially named path")
         self.git(source, "push", str(bare), "main")
-        self.cli(top, "sync")
+        self.cli(top, "sync", "--init")
         self.assertTrue((top / path / "file").is_file())
         data = json.loads(self.cli(top / path, "path", "--json").stdout)
         self.assertEqual(data["path_parent"], path)
@@ -296,17 +296,17 @@ printf '%s\n' "${COMPREPLY[@]}"
 
     def test_sync_initializes_three_levels_and_keeps_pins(self):
         _, _, top, _, _, leaf_source, leaf_bare = self.make_sync_tree()
-        self.cli(top, "sync")
+        self.cli(top, "sync", "--init")
         nested = top / "middle/leaf"
         before = self.git(nested, "rev-parse", "HEAD")
         self.advance(leaf_source, leaf_bare)
-        self.cli(top, "sync")
+        self.cli(top, "sync", "--init")
         self.assertEqual(self.git(nested, "rev-parse", "HEAD"), before)
         self.assertEqual(self.git(top, "status", "--porcelain"), "")
 
     def test_sync_remote_updates_and_continues_safe_sibling(self):
         _, _, top, _, _, leaf_source, leaf_bare = self.make_sync_tree()
-        self.cli(top, "sync")
+        self.cli(top, "sync", "--init")
         self.git(top, "config", "submodule.middle.branch", "main")
         self.git(top, "config", "submodule.sibling.branch", "main")
         (top / "middle/file").write_text("local edit\n")
@@ -319,7 +319,7 @@ printf '%s\n' "${COMPREPLY[@]}"
 
     def test_sync_outermost_is_explicit(self):
         _, _, top, _, _, _, _ = self.make_sync_tree()
-        self.cli(top, "sync")
+        self.cli(top, "sync", "--init")
         # A pinned detached child is an invalid root by itself.
         self.assertEqual(self.cli(top / "middle", "sync", ok=False).returncode, 1)
         self.cli(top / "middle", "sync", "--outermost")
@@ -458,7 +458,7 @@ printf '%s\n' "${COMPREPLY[@]}"
         top_source, top_bare, top = self.remote_repo("pub-top")
         self.sub(top_source, mid_bare, "middle")
         self.git(top_source, "push", str(top_bare), "main")
-        self.cli(top, "sync")
+        self.cli(top, "sync", "--init")
         mid, leaf = top / "middle", top / "middle/leaf"
         for repo, bare in ((top, top_bare), (mid, mid_bare), (leaf, leaf_bare)):
             self.git(repo, "checkout", "main")
@@ -535,7 +535,7 @@ printf '%s\n' "${COMPREPLY[@]}"
 
     def test_sync_preserves_unpublished_submodule_commit(self):
         _, _, top, _, _, _, _ = self.make_sync_tree()
-        self.cli(top, "sync")
+        self.cli(top, "sync", "--init")
         child = top / "middle"
         (child / "local").write_text("unpublished\n")
         self.git(child, "add", "local"); self.git(child, "commit", "-m", "unpublished")
@@ -545,7 +545,7 @@ printf '%s\n' "${COMPREPLY[@]}"
 
     def test_sync_refuses_submodule_removal(self):
         source, bare, top, _, _, _, _ = self.make_sync_tree()
-        self.cli(top, "sync")
+        self.cli(top, "sync", "--init")
         self.git(source, "rm", "-f", "sibling"); self.git(source, "commit", "-m", "remove")
         self.git(source, "push", str(bare), "main")
         before = self.git(top, "rev-parse", "HEAD")
@@ -669,21 +669,21 @@ printf '%s\n' "${COMPREPLY[@]}"
     def test_compact_and_verbose_inspection(self):
         repo = self.repo("pretty space\nrepo")
         self.git(repo, "remote", "add", "origin", "https://user:SECRET@github.com/5nik7/remote-name.git?token=PRIVATE")
-        plain = self.cli(repo, "--no-color").stdout
-        verbose = self.cli(repo, "--no-color", "--verbose").stdout
+        plain = self.cli(repo, "info", "--no-color").stdout
+        verbose = self.cli(repo, "info", "--no-color", "--verbose").stdout
         self.assertIn(r"Repository pretty space\x0arepo", plain)
         self.assertIn("Matches configured owner", plain)
         self.assertNotIn("Remote details", plain)
         self.assertIn("https://github.com/5nik7/remote-name.git", verbose)
-        self.assertIn("Verified ancestry", verbose)
+        self.assertIn("Outermost", verbose)
         for output in (plain, verbose):
             self.assertNotIn("SECRET", output)
             self.assertNotIn("PRIVATE", output)
             self.assertNotIn("\x1b", output)
-        self.assertEqual(verbose, self.cli(repo, "-v", "--verbose", "--no-color").stdout)
+        self.assertEqual(verbose, self.cli(repo, "info", "-v", "--verbose", "--no-color").stdout)
         self.git(repo, "remote", "remove", "origin")
-        self.assertIn("Not configured", self.cli(repo).stdout)
-        self.assertIn("No configured owner match", self.cli(repo).stdout)
+        self.assertIn("Not configured", self.cli(repo, "info").stdout)
+        self.assertIn("No configured owner match", self.cli(repo, "info").stdout)
         self.assertIn("--verbose", self.cli(self.base, "--help").stdout)
         self.assertEqual(self.cli(self.base, "-v", "-V").stdout,
                          self.cli(self.base, "--version").stdout)
@@ -707,7 +707,7 @@ printf '%s\n' "${COMPREPLY[@]}"
 
     def test_compact_sync_details_paths_and_partial_completion(self):
         _, _, top, _, _, _, _ = self.make_sync_tree()
-        self.cli(top, "sync")
+        self.cli(top, "sync", "--init")
         plain = self.cli(top, "sync").stdout
         verbose = self.cli(top, "sync", "-v").stdout
         self.assertRegex(plain, r"unchanged\s+middle/leaf\n")
@@ -744,8 +744,8 @@ printf '%s\n' "${COMPREPLY[@]}"
             self.assertIn("Target   refs/heads/main\n", preview)
             self.assertIn("Message  review this\n", preview)
             heading = "[A ] staged added (1)" if flags else "staged added (1)"
-            self.assertIn("    " + heading + "\n", preview)
-            self.assertIn(r"      selected space\x09line\x0aend", preview)
+            self.assertIn(("  " if flags else "    ") + heading + "\n", preview)
+            self.assertIn(("  ` " if flags else "      ") + r"selected space\x09line\x0aend", preview)
             self.assertIn("child pointers may also be staged", preview)
             self.assertIn("Preview complete", preview)
             rows = [line.split(maxsplit=1) for line in preview.splitlines()

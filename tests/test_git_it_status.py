@@ -47,7 +47,7 @@ class StatusTests(unittest.TestCase):
         self.assertEqual(self.git(root, "show-ref"), ref_bytes)
         verbose = self.cli(root, "status", "--view", "verbose", "--no-color").stdout
         self.assertIn("[R ] staged renamed (1)", verbose)
-        self.assertIn(r"file -> renamed with\x09λ", verbose)
+        self.assertIn(r"file → renamed with\x09λ", verbose)
         self.assertIn(r"unknown\x0a\x1b", verbose)
         self.assertIn("refs/remotes/origin/main", verbose)
         self.assertIn("https://example.invalid/group/repo.git", verbose)
@@ -92,8 +92,8 @@ class StatusTests(unittest.TestCase):
         self.assertTrue(report["complete"])
         self.assertEqual(report["repositories"][0]["status"], "conflict")
         grouped = self.cli(repo, "status", "--view", "default", "--no-color").stdout
-        self.assertRegex(grouped, r'(?m)^    conflict: both modified \(1\)$')
-        self.assertRegex(grouped, r'(?m)^    untracked \(2\)\n      a\n      z$')
+        self.assertRegex(grouped, r'(?m)^\| conflict: both modified \(1\)$')
+        self.assertRegex(grouped, r'(?m)^\| untracked \(2\)\n\| \| a\n\| ` z$')
         short = self.cli(repo, "-s", "--short", "--no-color").stdout
         self.assertIn("States  [UU] (1) / [??] (2)", short)
         self.assertIn("[UU] file", short)

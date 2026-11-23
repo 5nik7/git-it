@@ -136,10 +136,14 @@ ui_load_preferences() {
     return 0
 }
 
+ui_icons_enabled() {
+    [[ $UI_ICON_MODE == always || ( $UI_ICON_MODE == auto && ${TERM:-dumb} != dumb &&
+        ( -t ${1:-1} || ${DOTS_MENU_CAPTURE:-} == 1 ) ) ]]
+}
+
 ui_icon() {
     REPLY=''
-    if [[ $UI_ICON_MODE == always || ( $UI_ICON_MODE == auto && ${TERM:-dumb} != dumb &&
-        ( -t ${3:-1} || ${DOTS_MENU_CAPTURE:-} == 1 ) ) ]]; then REPLY=${UI_ICONS[$1]-$2}; fi
+    if ui_icons_enabled "${3:-1}"; then REPLY=${UI_ICONS[$1]-$2}; fi
 }
 
 ui_git_style() {
@@ -291,6 +295,62 @@ ui_cell_width() {
     else REPLY=1; fi
 }
 
+# Use the tree for a selected human view. Preserve ordinary redirected output.
+ui_tree_active() {
+    [[ -t 1 || ${DOTS_MENU_CAPTURE:-} == 1 || -n ${STATUS_VIEW:-} || ${DOTS_ICONS:-} == always || ${REPORT_SUBMODULES:-0} == 1 ]]
+}
+
+ui_tree_symbols() {
+    if ui_icons_enabled; then
+        TREE_BAR='│' TREE_FORK='├' TREE_END='└' TREE_RULE='─'
+        TREE_TL='┌' TREE_TR='┐' TREE_BL='└' TREE_BR='┘'
+    else
+        TREE_BAR='|' TREE_FORK='|' TREE_END='`' TREE_RULE='-'
+        TREE_TL='+' TREE_TR='+' TREE_BL='+' TREE_BR='+'
+    fi
+}
+
+ui_width() {
+    local str=$1 i total=0
+    for ((i=0; i<${#str}; i++)); do ui_cell_width "${str:i:1}"; ((total+=REPLY)); done
+    REPLY=$total
+}
+
+# Escape values before measuring them. Wrap them inside the box, never
+# including ANSI in the measurements or breaking an escape sequence.
+ui_tree_box() {
+    local gutter=$1 label value i j ch n width longest=0 cells line amount edge labelwidth=0
+    local -a fields=("${@:2}")
+    ui_columns
+    for ((i=0; i<${#fields[@]}; i+=2)); do
+        label=${fields[i]}; ((${#label} <= labelwidth)) || labelwidth=${#label}
+        display "${fields[i+1]:-unavailable}"; fields[i+1]=$REPLY
+        ui_width "$REPLY"; ((REPLY <= longest)) || longest=$REPLY
+    done
+    width=$((UI_COLUMNS-${#gutter}-labelwidth-6))
+    if ((width < 2)); then
+        for ((i=0; i<${#fields[@]}; i+=2)); do ui_spans 0 "$gutter${fields[i]} " "$BLUE" "${fields[i+1]}" ''; done
+        return
+    fi
+    ((longest <= width)) || longest=$width
+    printf -v edge '%*s' "$((longest+labelwidth+4))" ''; edge=${edge// /$TREE_RULE}
+    printf '%s%s%s%s\n' "$gutter" "$TREE_TL" "$edge" "$TREE_TR"
+    for ((i=0; i<${#fields[@]}; i+=2)); do
+        label=${fields[i]}; value=${fields[i+1]}; line='' cells=0
+        for ((j=0; j<${#value}; j++)); do
+            ch=${value:j:1}; ui_cell_width "$ch"; n=$REPLY
+            if ((cells && cells+n>longest)); then
+                printf '%s%s %s%-*s%s  %s%*s %s\n' "$gutter" "$TREE_BAR" "$BLUE" "$labelwidth" "$label" "${BLUE:+$RESET}" "$line" "$((longest-cells))" '' "$TREE_BAR"
+                label='' line='' cells=0
+            fi
+            line+=$ch; ((cells+=n))
+        done
+        amount=$((longest-cells)); ((amount>=0)) || amount=0
+        printf '%s%s %s%-*s%s  %s%*s %s\n' "$gutter" "$TREE_BAR" "$BLUE" "$labelwidth" "$label" "${BLUE:+$RESET}" "$line" "$amount" '' "$TREE_BAR"
+    done
+    printf '%s%s%s%s\n' "$gutter" "$TREE_BL" "$edge" "$TREE_BR"
+}
+
 ui_spans() {
     local indent=$1 text style ch prefix i used=0 cells continuation=${UI_CONTINUATION:-$1}
     shift
@@ -299,7 +359,8 @@ ui_spans() {
     ui_indent "$indent"; printf '%s' "$REPLY"
     ((continuation < UI_COLUMNS-2)) || continuation=$((UI_COLUMNS-2))
     ui_indent "$continuation"; prefix=$REPLY
-    if [[ ! -t 1 && ${DOTS_MENU_CAPTURE:-} != 1 ]]; then
+    if [[ -n ${UI_WRAP_GUTTER:-} ]]; then prefix=$UI_WRAP_GUTTER; continuation=${#prefix}; fi
+    if [[ ! -t 1 && ${DOTS_MENU_CAPTURE:-} != 1 && -z ${UI_WRAP_GUTTER:-} ]]; then
         while (($# >= 2)); do
             display "$1"; printf '%s%s%s' "$2" "$REPLY" "${2:+$RESET}"; shift 2
         done

@@ -222,6 +222,13 @@ inspect_main() {
         elif [[ $CMD == path ]]; then display "$ROOT"; printf '%s' "$REPLY"
         else
             ui_prepare
+            if ui_tree_active && [[ $CMD != overview ]]; then
+                # The machine inspection selectors above never load status code.
+                # shellcheck source=lib/status.bash
+                source "$LIB/status.bash"
+                local REPORT_MODE=info
+                status_main; return
+            fi
             if [[ $OWNED == true ]]; then ui_git_style repo_owned; else ui_git_style repo; fi
             ui_heading "Repository ${ROOT##*/}" "$REPLY"
             ui_field Root "$ROOT" path

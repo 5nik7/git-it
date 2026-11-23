@@ -4,7 +4,7 @@ A Bash Git helper for Termux and Linux. Inspect remote URLs, format prompt
 fields, check status across registered submodules, and sync or publish changes.
 
 ```bash
-git-it                            # repository info, plus any local changes
+git-it                            # command help inside a repository
 git-it -i                         # host icon for your prompt
 git-it info --json                # local metadata
 git-it -R --https                 # HTTPS form of the selected fetch URL
@@ -22,7 +22,7 @@ Version **0.1.0**. The repository includes a Linux CI workflow. See
 
 Requires Bash 5+, Git and standard core utilities. Publishing uses `sha256sum`;
 installation also uses `realpath`, `install`, `mktemp`, `cp` and `tail`. A Nerd Font
-is needed for host glyphs. Python 3 and ShellCheck are development dependencies.
+is needed for host glyphs. Reading a declared Dots Wiki requires Python 3. Publishing generated Dots Wiki pages also uses the Dots Wiki verifier. The ordinary Git commands and sibling Wiki discovery work with Bash and Git.
 Zsh, Fish and mandoc provide additional completion/manual validation.
 
 On Termux: `pkg install bash git coreutils python shellcheck`.
@@ -68,7 +68,7 @@ autoload -Uz compinit && compinit
 source /path/to/prefix/share/fish/vendor_completions.d/git-it.fish
 ```
 
-Zsh identifies `info`, `path`, `status`, `sync`, and `publish` as commands, with options
+Zsh groups Git commands, submodule names, Wiki actions, and flags by type, with options
 and option values retaining native completion tags. Shell completion preferences
 can color these types, including in Dots/fzf-tab, while inserted tokens and
 generated completion source remain literal. `git-it` does not change global
@@ -106,14 +106,7 @@ recorded revision.
 
 ## Inspection and prompt formatting
 
-Run `git-it` in a worktree for repository info. If it or a registered
-submodule has local file changes, a grouped status section follows. Missing or
-unreadable children also appear and give the report exit status 1. A clean
-branch ahead of or behind its upstream shows the info section alone.
-`git-it -C DIR` and presentation options select the same default. Use
-`git-it info` for metadata alone, or `git-it status` to include clean
-repositories. Outside a worktree the default prints a diagnostic and usage to
-stderr and exits 3.
+Run `git-it` to see usage. Outside a worktree it also prints a warning to stderr and exits 3. Explicit `git-it --help` succeeds anywhere. Use `git-it info` for the repository summary or `git-it status` for the full tree of repositories and changed files.
 
 ```bash
 git-it
@@ -272,6 +265,18 @@ both paths. Select `--view default|short|verbose`, or use `--short` or
 and format strings retain their path values. The report uses local tracking refs
 and never fetches, initializes children, or refreshes the index.
 
+The default terminal view shows the root host, protocol, remote, upstream, owner and path in a box. Each repository row identifies its branch or detached commit. The 󱦲 and 󱦳 counters show nonzero ahead and behind counts from local tracking refs. GitHub submodules use , other submodules use , and a Wiki uses 󱔘. Files are grouped by their full index and worktree state. `git-it -s` selects status and `git-it status -s` selects the short view.
+
+```bash
+git-it submodules --depth 1
+git-it submodule editor status
+git-it submodules publish plugins/editor --dry-run
+git-it wiki status
+git-it wiki publish --dry-run
+```
+
+A declared project Wiki takes precedence. Otherwise, info and status recognize a sibling checkout named `<worktree>.wiki` whose fetch remote matches the source project’s host and namespace and ends in `<project>.wiki`. Top-level sync and publish include a declared Wiki after its source. For an inferred sibling, select `wiki sync` or `wiki publish` explicitly. Use `--no-wiki` to exclude the companion.
+
 Status JSON has `schema: 1`, `remote_state: "cached"`, ordered `repositories`,
 and `complete`. Each repository has its path, branch, status, ahead and behind
 counts (null when unavailable), and file records with `path`, `xy`, and
@@ -286,7 +291,7 @@ submodules are traversed; unrelated nested repositories are not scanned.
 
 The root requires an attached branch and one upstream. Fetch and fast-forward
 retain local ahead commits and refuse divergence. Children default to the
-parent-recorded commit; missing children are initialized, and checkouts may be
+parent-recorded commit. Use `sync --init` to initialize a missing child. Checkouts may be
 detached. Each parent updates before its descendants are discovered.
 
 `sync --remote` selects `submodule.NAME.branch`, falling back to an attached

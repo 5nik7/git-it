@@ -56,7 +56,7 @@ class PresentationTests(unittest.TestCase):
         self.assertEqual(self.probes.read_text(), "probe\nprobe\n")
         self.prefs.write_text("__git.view\tverbose\tliteral\n__format.label_width\t14\tformatting\n"
                               "__format.indent\t3\tformatting\n")
-        self.assertRegex(self.cli("status").stdout, r"(?m)^   Path {11}/")
+        self.assertRegex(self.cli("status").stdout, r"(?m)^││ Root +/")
 
     def test_default_scalar_and_structured_routes_skip_dots(self):
         (self.repo / "example.xyz").touch()
@@ -75,24 +75,22 @@ class PresentationTests(unittest.TestCase):
     def test_home_paths_in_human_info_and_status(self):
         home = self.fixture.repo("user home")
         child = self.fixture.sub(home, self.repo, "child")
-        env = dict(self.env, HOME=str(home) + "/")
+        env = dict(self.env, HOME=str(home) + "/", COLUMNS="200")
 
         def child_cli(*args):
             return self.fixture.cli(child, *args, env=env).stdout
 
         info = child_cli("info", "-v")
-        self.assertRegex(info, r"(?m)^  Root +~/child$")
-        self.assertRegex(info, r"(?m)^  Parent +~$")
-        self.assertRegex(info, r"(?m)^  Outermost +~$")
-        self.assertIn("\n    ~\n    ~/child\n", info)
-        self.assertNotIn(str(home), info.split("Verified ancestry", 1)[1])
+        self.assertRegex(info, r"(?m)^\|\| Root +~/child +\|$")
+        self.assertRegex(info, r"(?m)^\|\| Parent +~ +\|$")
+        self.assertRegex(info, r"(?m)^\|\| Outermost +~ +\|$")
         (child / "new file").touch()
         status = child_cli("status", "-v")
-        self.assertRegex(status, r"(?m)^  Path +~/child$")
-        self.assertIn("\n      new file\n", status)
+        self.assertRegex(status, r"(?m)^\|\| Root +~/child +\|$")
+        self.assertIn("\n| ` new file\n", status)
         full = child_cli("status", "-v", "--full-paths")
         self.assertIn(str(child / "new file"), full)
-        self.assertRegex(full, r"(?m)^  Path +" + re.escape(str(child)) + "$")
+        self.assertRegex(full, r"(?m)^\|\| Root +" + re.escape(str(child)) + r" +\|$")
         self.assertEqual(child_cli("--get", "root"), str(child) + "\n")
         self.assertEqual(child_cli("--format", "{root}"), str(child) + "\n")
         self.assertEqual(child_cli("path"), str(child) + "\n")
@@ -120,7 +118,7 @@ class PresentationTests(unittest.TestCase):
                 self.env.update(DOTS_MENU_CAPTURE="1", DOTS_ICONS="never", COLUMNS=str(width))
                 rendered = self.cli("status", "--no-color").stdout
                 self.assertTrue(all(len(line) <= width for line in rendered.splitlines()))
-                self.assertIn("abcde" * 30 + ".xyz", "".join(row.strip() for row in rendered.splitlines()))
+                self.assertIn("abcde" * 30 + ".xyz", "".join(row.lstrip("| `") for row in rendered.splitlines()))
 
     def test_terminal_progress_modes_and_streams(self):
         # Give the renderer separate ttys, so its stderr and the permanent

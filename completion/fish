@@ -16,9 +16,12 @@ function __git_it_context
                     set pending 1
                 end
             case -s --status
-                set cmd status
+                test "$cmd" != root; or set cmd status
             case --sync
                 set cmd sync
+            case wiki submodule submodules
+                contains -- scope $argv
+                return
             case info path status sync publish
                 set cmd $word
         end
@@ -27,7 +30,7 @@ function __git_it_context
 end
 
 complete -c git-it -f
-complete -c git-it -n '__git_it_context root' -a 'info path status sync publish'
+complete -c git-it -n '__git_it_context root' -a 'info path status sync publish submodules submodule wiki'
 complete -c git-it -n '__git_it_context root' -l status -s s -d 'Show local repository changes'
 complete -c git-it -n '__git_it_context root' -l sync -d 'Synchronize repository tree'
 complete -c git-it -s C -l directory -r -a '(__fish_complete_directories)' -d 'Working directory'
@@ -53,12 +56,32 @@ complete -c git-it -n "$inspect" -l https -d 'HTTPS URL'
 complete -c git-it -n "$inspect" -l no-newline -s n -d 'Suppress newline'
 complete -c git-it -n "$inspect" -l list-fields -d 'List fields'
 complete -c git-it -n "$inspect" -l remote -x -d 'Choose inspection remote'
+complete -c git-it -n '__git_it_context sync' -l init -d 'Permit initializing missing submodules'
 complete -c git-it -n '__git_it_context sync' -l remote -d 'Advance configured submodule branches'
-complete -c git-it -n '__git_it_context root status' -l view -x -a 'default short verbose'
-complete -c git-it -n '__git_it_context root status' -l short -d 'Use compact status view'
-complete -c git-it -n '__git_it_context root status' -l full-paths -d 'Show absolute paths'
+complete -c git-it -n '__git_it_context root info status sync publish' -l no-wiki -d 'Exclude the associated wiki'
+complete -c git-it -n '__git_it_context root info status sync publish' -l view -x -a 'default short verbose'
+complete -c git-it -n '__git_it_context info status sync publish' -s s -d 'Use compact output'
+complete -c git-it -n '__git_it_context root info status sync publish' -l short -d 'Use compact status view'
+complete -c git-it -n '__git_it_context root info status sync publish' -l full-paths -d 'Show absolute paths'
 complete -c git-it -n '__git_it_context root status sync publish' -l outermost
 complete -c git-it -n '__git_it_context root sync publish' -l dry-run
 complete -c git-it -n '__git_it_context root publish' -l message -s m -x
 complete -c git-it -n '__git_it_context root publish' -l all
 complete -c git-it -n '__git_it_context root publish' -l yes
+
+function __git_it_scope_candidates
+    set -l words (commandline -opc)
+    set -l current (commandline -ct)
+    command git-it __complete-scope $words[2..-1] "$current" 2>/dev/null | while read -l record
+        set -l fields (string split \t -- $record)
+        switch $fields[1]
+            case candidate
+                printf '%s\t%s\n' "$fields[2]" "$fields[3]"
+            case directory
+                __fish_complete_directories "$current"
+            case file
+                __fish_complete_path "$current"
+        end
+    end
+end
+complete -c git-it -n '__git_it_context scope' -a '(__git_it_scope_candidates)'

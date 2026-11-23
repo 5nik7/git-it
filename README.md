@@ -185,6 +185,11 @@ a terminal and no `NO_COLOR`; explicit always overrides that variable.
 Human reports use aligned labels and semantic colors. With Dots available,
 git-it reads the active help, icon, layout, and progress preferences and the
 published Git and file styles. A standalone installation has built-in defaults.
+In a status tree, the outer guides and metadata box border use the theme's
+`dark_foreground` (gray in standalone mode). The inner `├`, `└`, and wrapped
+`│` use the file's Git status foreground. For example, the file guides under
+`unstaged modified` follow the modified color. These guides remain visible
+with icons or color turned off.
 CLI color options control the destination stream. Metadata, JSON, formats,
 bare paths, version, and completion source stay plain. Help reads the logo and
 presentation settings without requiring Git or a git-it ownership config.

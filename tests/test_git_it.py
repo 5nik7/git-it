@@ -745,7 +745,7 @@ printf '%s\n' "${COMPREPLY[@]}"
             self.assertIn("Message  review this\n", preview)
             heading = "[A ] staged added (1)" if flags else "staged added (1)"
             self.assertIn(("  " if flags else "    ") + heading + "\n", preview)
-            self.assertIn(("  ` " if flags else "      ") + r"selected space\x09line\x0aend", preview)
+            self.assertIn(("  └ " if flags else "      ") + r"selected space\x09line\x0aend", preview)
             self.assertIn("child pointers may also be staged", preview)
             self.assertIn("Preview complete", preview)
             rows = [line.split(maxsplit=1) for line in preview.splitlines()

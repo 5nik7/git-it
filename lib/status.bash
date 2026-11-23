@@ -139,7 +139,7 @@ status_tree_row() {
         *) case $HOST in github.com) ui_icon hosts.github "$HOST_ICON" ;; gitlab.com) ui_icon hosts.gitlab "$HOST_ICON" ;;
                bitbucket.org) ui_icon hosts.bitbucket "$HOST_ICON" ;; *) ui_icon git.repository "$HOST_ICON" ;; esac ;;
     esac
-    icon=$REPLY; ui_git_style "$repo_role"; spans+=("$row_prefix" '' "${icon:+$icon }$label" "$REPLY")
+    icon=$REPLY; ui_git_style "$repo_role"; spans+=("$row_prefix" "$TREE_COLOR" "${icon:+$icon }$label" "$REPLY")
     if [[ $branch_display == 'detached '* ]]; then branch_display=${branch_display#detached }; branch_role=detached; fi
     if [[ -z $branch_display ]]; then
         if [[ $state == missing || $state == blocked ]]; then branch_display=unavailable; else branch_display=unborn; fi
@@ -156,8 +156,8 @@ status_tree_row() {
     if [[ $state == @(missing|blocked|conflict) || $view == verbose ]]; then ui_git_style "$state"; spans+=("  $state" "$REPLY"); fi
     local UI_WRAP_GUTTER="$bar "
     ui_spans 0 "${spans[@]}"
-    if [[ ${pointer_changed[$dir]:-} ]]; then ui_spans 0 "$bar Pointer  " "$YELLOW" 'differs from parent index' ''; fi
-    if [[ -n ${reasons[$dir]:-} ]]; then ui_spans 0 "$bar Reason  " "$YELLOW" "${reasons[$dir]}" ''; fi
+    if [[ ${pointer_changed[$dir]:-} ]]; then ui_spans 0 "$bar " "$TREE_COLOR" 'Pointer  ' "$YELLOW" 'differs from parent index' ''; fi
+    if [[ -n ${reasons[$dir]:-} ]]; then ui_spans 0 "$bar " "$TREE_COLOR" 'Reason  ' "$YELLOW" "${reasons[$dir]}" ''; fi
     if [[ $state != @(missing|blocked) && ( $view == verbose || $view != short && $dir == "$ROOT" ) ]]; then
         ui_path "$dir"
         if [[ -z $HOST || $PROTOCOL == file ]]; then OWNER=''; fi
@@ -276,7 +276,7 @@ status_main() {
             status_json_row "$dir"
         elif ((tree)); then
             status_gutter "$dir"
-            if ((idx)); then printf '%s\n' "${row_prefix%??}$TREE_BAR"; fi
+            if ((idx)); then printf '%s\n' "$TREE_COLOR${row_prefix%??}$TREE_BAR${TREE_COLOR:+$RESET}"; fi
             status_tree_row "$dir"
         else status_human_row "$dir"; fi
     done

@@ -10,6 +10,22 @@ import unittest
 import test_git_it as fixtures
 
 
+def styled_lines(output):
+    """Pair each visible character with its active SGR for span-level assertions."""
+    active = ""
+    rows = []
+    for line in output.splitlines():
+        parts = re.split(r"\x1b\[([0-9;]*)m", line)
+        styles = []
+        for i, part in enumerate(parts):
+            if i % 2:
+                active = "" if part in ("", "0") else part
+            else:
+                styles.extend([active] * len(part))
+        rows.append(("".join(parts[::2]), styles))
+    return rows
+
+
 class PresentationTests(unittest.TestCase):
     def setUp(self):
         self.fixture = fixtures.GitItTest()
@@ -34,13 +50,16 @@ class PresentationTests(unittest.TestCase):
             "with open(os.environ['TEST_PROBES'], 'a') as log: log.write('probe\\n')\n"
             "print(pathlib.Path(os.environ['TEST_PREFS']).read_text(), end='')\n")
         self.prefs.write_text("__help.color.option\t38;5;123\tstyle\n"
+                              "__color.git_guide\t38;5;238\tstyle\n"
                               "__cli.progress\tboth\tliteral\n"
                               "__format.label_width\t14\tformatting\n"
                               "__format.indent\t3\tformatting\n"
                               "__icon.git.status.untracked\t?\tstyle\n")
-        (self.theme / "git-styles.tsv").write_text("dots-git-styles\t1\nuntracked\t38;5;165\n")
+        (self.theme / "git-styles.tsv").write_text(
+            "dots-git-styles\t1\nuntracked\t38;5;165\nmodified\t1;48;5;236;38;5;166\n")
         (self.theme / "file-styles.tsv").write_text(
-            "dots-file-styles\t1\ntype\tfile\t39\t-\nsuffix\t.xyz\t38;5;177\tfold\n")
+            "dots-file-styles\t1\ntype\tfile\t39\t-\ntype\tdir\t38;5;118\t-\n"
+            "suffix\t.xyz\t38;5;177\tfold\n")
 
     def cli(self, *args, **kwargs):
         return self.fixture.cli(self.repo, *args, env=self.env, **kwargs)
@@ -81,16 +100,16 @@ class PresentationTests(unittest.TestCase):
             return self.fixture.cli(child, *args, env=env).stdout
 
         info = child_cli("info", "-v")
-        self.assertRegex(info, r"(?m)^\|\| Root +~/child +\|$")
-        self.assertRegex(info, r"(?m)^\|\| Parent +~ +\|$")
-        self.assertRegex(info, r"(?m)^\|\| Outermost +~ +\|$")
+        self.assertRegex(info, r"(?m)^││ Root +~/child +│$")
+        self.assertRegex(info, r"(?m)^││ Parent +~ +│$")
+        self.assertRegex(info, r"(?m)^││ Outermost +~ +│$")
         (child / "new file").touch()
         status = child_cli("status", "-v")
-        self.assertRegex(status, r"(?m)^\|\| Root +~/child +\|$")
-        self.assertIn("\n| ` new file\n", status)
+        self.assertRegex(status, r"(?m)^││ Root +~/child +│$")
+        self.assertIn("\n│ └ new file\n", status)
         full = child_cli("status", "-v", "--full-paths")
         self.assertIn(str(child / "new file"), full)
-        self.assertRegex(full, r"(?m)^\|\| Root +" + re.escape(str(child)) + r" +\|$")
+        self.assertRegex(full, r"(?m)^││ Root +" + re.escape(str(child)) + r" +│$")
         self.assertEqual(child_cli("--get", "root"), str(child) + "\n")
         self.assertEqual(child_cli("--format", "{root}"), str(child) + "\n")
         self.assertEqual(child_cli("path"), str(child) + "\n")
@@ -111,14 +130,86 @@ class PresentationTests(unittest.TestCase):
         self.assertIn("\x1b[95m", output)
         self.assertFalse(self.probes.exists())
 
-    def test_status_wraps_at_terminal_width(self):
-        (self.repo / ("abcde" * 30 + ".xyz")).touch()
+    def test_colored_tree_distinguishes_repository_guides_file_edges_and_names(self):
+        self.env.update(DOTS_MENU_CAPTURE="1", DOTS_ICONS="never", COLUMNS="200")
+        self.fixture.sub(self.repo, self.fixture.repo("module-source"), "module")
+        folder = self.repo / "nested"
+        folder.mkdir()
+        mixed = folder / "mixed.xyz"
+        mixed.write_text("committed\n")
+        self.fixture.git(self.repo, "add", "nested/mixed.xyz")
+        self.fixture.git(self.repo, "commit", "-m", "Track mixed-state file")
+        mixed.write_text("staged\n")
+        self.fixture.git(self.repo, "add", "nested/mixed.xyz")
+        mixed.write_text("unstaged\n")
+        for name in ("new-a.xyz", "new-b.xyz"):
+            (folder / name).touch()
+
+        rendered = self.cli("status", "--color=always").stdout
+        rows = dict(styled_lines(rendered))
+        # Compare the same terminal view with all SGR removed. Icons are off
+        # throughout, so these box and tree glyphs belong to the layout.
+        self.assertEqual(self.cli("status", "--no-color").stdout,
+                         re.sub(r"\x1b\[[0-9;]*m", "", rendered))
+        guide = "38;5;238"
+        for corner in ("│┌", "│└"):
+            edge, = (line for line in rows if line.startswith(corner))
+            self.assertEqual(set(rows[edge]), {guide}, edge)
+        detail, = (line for line in rows if line.startswith("││ Root "))
+        self.assertEqual([rows[detail][i] for i in (0, 1, -1)], [guide] * 3)
+        child, = (line for line in rows if line.startswith("└ module "))
+        self.assertEqual(rows[child][0], guide)
+        self.assertEqual(rows["│ untracked (2)"][0], guide)
+        self.assertEqual(rows["│ staged modified + unstaged modified (1)"][-1], "1;48;5;236;38;5;166")
+
+        for prefix, name, shade in (("│ └ ", "mixed.xyz", "38;5;166"),
+                                    ("│ ├ ", "new-a.xyz", "38;5;165"),
+                                    ("│ └ ", "new-b.xyz", "38;5;165")):
+            row = prefix + "nested/" + name
+            colors = rows[row]
+            self.assertEqual((colors[0], colors[2]), (guide, shade), row)
+            self.assertEqual(set(colors[len(prefix):-len(name)]), {"38;5;118"}, row)
+            self.assertEqual(set(colors[-len(name):]), {"38;5;177"}, row)
+
+        short = dict(styled_lines(self.cli("status", "--short", "--color=always").stdout))
+        for row, shade in (("│ ├ [MM] nested/mixed.xyz", "38;5;166"),
+                           ("│ ├ [??] nested/new-a.xyz", "38;5;165"),
+                           ("│ └ [??] nested/new-b.xyz", "38;5;165")):
+            self.assertEqual((short[row][0], short[row][2]), (guide, shade), row)
+            self.assertEqual(short[row][-1], "38;5;177", row)
+
+    def test_tree_fallback_without_dots(self):
+        self.env.update(DOTS=str(self.fixture.base / "absent-dots"),
+                        XDG_STATE_HOME=str(self.fixture.base / "empty-state"),
+                        DOTS_MENU_CAPTURE="1", DOTS_ICONS="never")
+        (self.repo / "new").touch()
+        rows = dict(styled_lines(self.cli("status", "--color=always").stdout))
+        colors = rows["│ └ new"]
+        self.assertEqual((colors[0], colors[2]), ("90", "95"))
+
+    def test_status_wraps_with_sibling_guides_at_terminal_width(self):
+        names = ["a" * 150 + ".xyz", "z" * 150 + ".xyz"]
+        for name in names:
+            (self.repo / name).touch()
         for width in (40, 80, 120):
             with self.subTest(width=width):
                 self.env.update(DOTS_MENU_CAPTURE="1", DOTS_ICONS="never", COLUMNS=str(width))
-                rendered = self.cli("status", "--no-color").stdout
-                self.assertTrue(all(len(line) <= width for line in rendered.splitlines()))
-                self.assertIn("abcde" * 30 + ".xyz", "".join(row.lstrip("| `") for row in rendered.splitlines()))
+                rows = styled_lines(self.cli("status", "--color=always").stdout)
+                self.assertTrue(all(len(line) <= width for line, _ in rows))
+                for name, edge, continuation in zip(names, ("│ ├ ", "│ └ "), ("│ │ ", "│   ")):
+                    start = next(i for i, (line, _) in enumerate(rows) if line.startswith(edge + name[0]))
+                    shown = rows[start][0][len(edge):]
+                    self.assertLess(len(shown), len(name))
+                    i = start
+                    while len(shown) < len(name):
+                        i += 1
+                        line, colors = rows[i]
+                        self.assertTrue(line.startswith(continuation), line)
+                        self.assertEqual(colors[0], "38;5;238", line)
+                        if "│" in continuation[1:]:
+                            self.assertEqual(colors[2], "38;5;165", line)
+                        shown += line[len(continuation):]
+                    self.assertEqual(shown, name)
 
     def test_terminal_progress_modes_and_streams(self):
         # Give the renderer separate ttys, so its stderr and the permanent

@@ -301,13 +301,33 @@ ui_tree_active() {
 }
 
 ui_tree_symbols() {
-    if ui_icons_enabled; then
-        TREE_BAR='│' TREE_FORK='├' TREE_END='└' TREE_RULE='─'
-        TREE_TL='┌' TREE_TR='┐' TREE_BL='└' TREE_BR='┘'
-    else
-        TREE_BAR='|' TREE_FORK='|' TREE_END='`' TREE_RULE='-'
-        TREE_TL='+' TREE_TR='+' TREE_BL='+' TREE_BR='+'
-    fi
+    TREE_BAR='│' TREE_FORK='├' TREE_END='└' TREE_RULE='─'
+    TREE_TL='┌' TREE_TR='┐' TREE_BL='└' TREE_BR='┘'
+    TREE_COLOR=''
+    if [[ -n $RESET ]]; then printf -v TREE_COLOR '\033[%sm' "${UI_COLORS[git_guide]:-90}"; fi
+}
+
+# A status heading can have attributes and a background. Only its foreground
+# belongs on the file guides. Treat extended colors as units, including those
+# for the background and underline, whose color components may look like SGRs.
+ui_foreground() {
+    REPLY=''
+    [[ -n $1 ]] || return 0
+    local code=${1#$'\033['} i size fg=39 IFS=';'
+    local -a parts
+    read -r -a parts <<< "${code%m}"
+    for ((i=0; i<${#parts[@]}; i++)); do
+        case ${parts[i]} in
+            0) fg=39 ;;
+            3[0-7]|39|9[0-7]) fg=${parts[i]} ;;
+            38|48|58)
+                case ${parts[i+1]:-} in 2) size=4 ;; 5) size=2 ;; *) break ;; esac
+                ((i+size < ${#parts[@]})) || break
+                if [[ ${parts[i]} == 38 ]]; then fg="${parts[*]:i:size+1}"; fi
+                ((i+=size)) ;;
+        esac
+    done
+    printf -v REPLY '\033[%sm' "$fg"
 }
 
 ui_width() {
@@ -329,26 +349,27 @@ ui_tree_box() {
     done
     width=$((UI_COLUMNS-${#gutter}-labelwidth-6))
     if ((width < 2)); then
-        for ((i=0; i<${#fields[@]}; i+=2)); do ui_spans 0 "$gutter${fields[i]} " "$BLUE" "${fields[i+1]}" ''; done
+        for ((i=0; i<${#fields[@]}; i+=2)); do ui_spans 0 "$gutter" "$TREE_COLOR" "${fields[i]} " "$BLUE" "${fields[i+1]}" ''; done
         return
     fi
     ((longest <= width)) || longest=$width
     printf -v edge '%*s' "$((longest+labelwidth+4))" ''; edge=${edge// /$TREE_RULE}
-    printf '%s%s%s%s\n' "$gutter" "$TREE_TL" "$edge" "$TREE_TR"
+    local left="$TREE_COLOR$gutter$TREE_BAR${TREE_COLOR:+$RESET}" right="$TREE_COLOR$TREE_BAR${TREE_COLOR:+$RESET}"
+    printf '%s\n' "$TREE_COLOR$gutter$TREE_TL$edge$TREE_TR${TREE_COLOR:+$RESET}"
     for ((i=0; i<${#fields[@]}; i+=2)); do
         label=${fields[i]}; value=${fields[i+1]}; line='' cells=0
         for ((j=0; j<${#value}; j++)); do
             ch=${value:j:1}; ui_cell_width "$ch"; n=$REPLY
             if ((cells && cells+n>longest)); then
-                printf '%s%s %s%-*s%s  %s%*s %s\n' "$gutter" "$TREE_BAR" "$BLUE" "$labelwidth" "$label" "${BLUE:+$RESET}" "$line" "$((longest-cells))" '' "$TREE_BAR"
+                printf '%s %s%-*s%s  %s%*s %s\n' "$left" "$BLUE" "$labelwidth" "$label" "${BLUE:+$RESET}" "$line" "$((longest-cells))" '' "$right"
                 label='' line='' cells=0
             fi
             line+=$ch; ((cells+=n))
         done
         amount=$((longest-cells)); ((amount>=0)) || amount=0
-        printf '%s%s %s%-*s%s  %s%*s %s\n' "$gutter" "$TREE_BAR" "$BLUE" "$labelwidth" "$label" "${BLUE:+$RESET}" "$line" "$amount" '' "$TREE_BAR"
+        printf '%s %s%-*s%s  %s%*s %s\n' "$left" "$BLUE" "$labelwidth" "$label" "${BLUE:+$RESET}" "$line" "$amount" '' "$right"
     done
-    printf '%s%s%s%s\n' "$gutter" "$TREE_BL" "$edge" "$TREE_BR"
+    printf '%s\n' "$TREE_COLOR$gutter$TREE_BL$edge$TREE_BR${TREE_COLOR:+$RESET}"
 }
 
 ui_spans() {
@@ -359,7 +380,11 @@ ui_spans() {
     ui_indent "$indent"; printf '%s' "$REPLY"
     ((continuation < UI_COLUMNS-2)) || continuation=$((UI_COLUMNS-2))
     ui_indent "$continuation"; prefix=$REPLY
-    if [[ -n ${UI_WRAP_GUTTER:-} ]]; then prefix=$UI_WRAP_GUTTER; continuation=${#prefix}; fi
+    if [[ -n ${UI_WRAP_GUTTER:-} ]]; then
+        local edge=${UI_WRAP_EDGE:-} edge_style=${UI_WRAP_EDGE_COLOR:-}
+        continuation=$((${#UI_WRAP_GUTTER}+${#edge}))
+        prefix="$TREE_COLOR$UI_WRAP_GUTTER${TREE_COLOR:+$RESET}$edge_style$edge${edge_style:+$RESET}"
+    fi
     if [[ ! -t 1 && ${DOTS_MENU_CAPTURE:-} != 1 && -z ${UI_WRAP_GUTTER:-} ]]; then
         while (($# >= 2)); do
             display "$1"; printf '%s%s%s' "$2" "$REPLY" "${2:+$RESET}"; shift 2

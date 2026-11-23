@@ -110,8 +110,8 @@ class StatusTests(unittest.TestCase):
         self.assertTrue(report["complete"])
         self.assertEqual(report["repositories"][0]["status"], "conflict")
         grouped = self.cli(repo, "status", "--view", "default", "--no-color").stdout
-        self.assertRegex(grouped, r'(?m)^\| conflict: both modified \(1\)$')
-        self.assertRegex(grouped, r'(?m)^\| untracked \(2\)\n\| \| a\n\| ` z$')
+        self.assertRegex(grouped, r'(?m)^│ conflict: both modified \(1\)$')
+        self.assertRegex(grouped, r'(?m)^│ untracked \(2\)\n│ ├ a\n│ └ z$')
         short = self.cli(repo, "-s", "--short", "--no-color").stdout
         self.assertIn("States  [UU] (1) / [??] (2)", short)
         self.assertIn("[UU] file", short)

@@ -41,13 +41,16 @@ status_group() {
 }
 
 status_file_line() {
-    local dir=$1 i=$2 prefix=${3:-} path=${paths[$2]} old=${oldpaths[$2]} actual
+    local dir=$1 i=$2 last=$3 prefix=${4:-} path=${paths[$2]} old=${oldpaths[$2]} actual
     actual=${dir%/}/$path
     if ((FULL_PATHS)); then
         path=$actual; [[ ! $old ]] || old=${dir%/}/$old
     fi
     if [[ ${TREE_FILES:-0} == 1 ]]; then
-        local -a segments=("$prefix" '')
+        local edge=$TREE_FORK edge_color=${guide_colors[${codes[i]}]}
+        local UI_WRAP_GUTTER=$TREE_GUTTER UI_WRAP_EDGE="$TREE_BAR " UI_WRAP_EDGE_COLOR=$edge_color
+        if [[ $i == "$last" ]]; then edge=$TREE_END; UI_WRAP_EDGE='  '; UI_WRAP_EDGE_COLOR=''; fi
+        local -a segments=("$TREE_GUTTER" "$TREE_COLOR" "$edge " "$edge_color" "$prefix" '')
         local value shown style file_icon
         for value in "${oldpaths[$i]}" "${paths[$i]}"; do
             [[ -n $value ]] || continue
@@ -67,12 +70,12 @@ status_file_line() {
 }
 
 status_files() {
-    local dir=$1 xy i group_label group_role group_icon group_color label last edge heading_indent=4
+    local dir=$1 xy i group_label group_role group_icon group_color label last heading_indent=4
     local TREE_FILES=${TREE_FILES:-0} TREE_GUTTER=${TREE_GUTTER:-} UI_WRAP_GUTTER=${UI_WRAP_GUTTER:-}
     if (( ! TREE_FILES )) && ui_tree_active; then TREE_FILES=1; ui_tree_symbols; TREE_GUTTER="  "; fi
     if ((TREE_FILES)); then heading_indent=0; UI_WRAP_GUTTER="$TREE_GUTTER  "; fi
     local -a order=() spans=()
-    local -A members=() counts=()
+    local -A members=() counts=() guide_colors=()
     for i in "${!paths[@]}"; do
         xy=${codes[i]}
         [[ ${members[$xy]+set} ]] || order+=("$xy")
@@ -80,6 +83,7 @@ status_files() {
     done
     for xy in "${order[@]}"; do
         status_group "$xy"
+        if ((TREE_FILES)); then ui_foreground "$group_color"; guide_colors[$xy]=$REPLY; fi
         if [[ $view == short || ${REPORT_MODE:-status} == @(info|list) ]]; then
             if ((${#spans[@]})); then spans+=(' / ' ''); elif [[ ${REPORT_MODE:-status} == @(info|list) ]]; then spans+=('Changes  ' ''); else spans+=('States  ' ''); fi
             if [[ $view == short ]]; then label="[$xy]"; else label=$group_label; fi
@@ -87,22 +91,19 @@ status_files() {
         else
             label="$group_label (${counts[$xy]})"
             [[ $view != verbose ]] || label="[$xy] $label"
-            ui_spans "$heading_indent" "$TREE_GUTTER" '' "${group_icon:+$group_icon }$label" "$group_color"
+            ui_spans "$heading_indent" "$TREE_GUTTER" "${TREE_COLOR:-}" "${group_icon:+$group_icon }$label" "$group_color"
             # Group membership holds integer array positions only.
             last=${members[$xy]% }; last=${last##* }
             for i in ${members[$xy]}; do
-                edge=''
-                if ((TREE_FILES)); then edge="$TREE_GUTTER$TREE_FORK "; [[ $i != "$last" ]] || edge="$TREE_GUTTER$TREE_END "; fi
-                status_file_line "$dir" "$i" "$edge"
+                status_file_line "$dir" "$i" "$last"
             done
         fi
     done
     if ((${#spans[@]})); then
-        ui_spans "$heading_indent" "$TREE_GUTTER" '' "${spans[@]}"
+        ui_spans "$heading_indent" "$TREE_GUTTER" "${TREE_COLOR:-}" "${spans[@]}"
         if [[ ${REPORT_MODE:-status} == status ]]; then
             for i in "${!paths[@]}"; do
-                edge=''; if ((TREE_FILES)); then edge="$TREE_GUTTER$TREE_FORK "; ((i+1 != ${#paths[@]})) || edge="$TREE_GUTTER$TREE_END "; fi
-                status_file_line "$dir" "$i" "${edge}[${codes[i]}] "
+                status_file_line "$dir" "$i" "$((${#paths[@]}-1))" "[${codes[i]}] "
             done
         fi
     fi

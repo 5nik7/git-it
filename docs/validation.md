@@ -3,6 +3,20 @@
 The checks below ran locally on Termux. The repository also has a Linux
 workflow in `.github/workflows/test.yml`.
 
+## Default repository report and live plugin installation — 2026-11-23 UTC
+
+All 70 standalone tests passed on Termux. A Git trace confirmed one status
+scan for the default report in a single worktree. Fixtures covered clean and
+dirty repositories, missing children, primary and error streams outside Git,
+home-relative display, literal absolute output, and runtime logo changes.
+The relocated Dots fixture also exercised a user-local launcher and both Dots
+entry points against an edited plugin logo without reinstalling.
+
+Bash, Zsh and Fish syntax checks, ShellCheck and mandoc lint passed. A five-run
+warm benchmark counted four Git calls for prompt icons with zero and 3,000
+untracked files. Path queries used six, nine and eleven calls at depths one
+through three. Desktop systems and hosted CI were outside this run.
+
 ## Remote queries, recursive status and Dots presentation — 2026-11-23 UTC
 
 All 66 standalone tests passed on Termux with Bash 5.3.20 and Git 2.56.1.

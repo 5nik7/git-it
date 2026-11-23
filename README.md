@@ -4,6 +4,7 @@ A Bash Git helper for Termux and Linux. Inspect remote URLs, format prompt
 fields, check status across registered submodules, and sync or publish changes.
 
 ```bash
+git-it                            # repository info, plus any local changes
 git-it -i                         # host icon for your prompt
 git-it info --json                # local metadata
 git-it -R --https                 # HTTPS form of the selected fetch URL
@@ -87,19 +88,32 @@ Uninstall removes only unchanged managed files. Modified files and user config
 are preserved; modified files produce a nonzero result and retain the manifest.
 Empty installation directories may remain. There is no self-update mechanism.
 
-Help reads `logo.txt` on each invocation. Standalone installation manages a
-copy at `share/git-it/logo.txt` in the selected prefix.
+Help reads `logo.txt` on each invocation and adds a blank line above the header
+and a one-space left margin. Standalone installation manages a copy at
+`share/git-it/logo.txt` in the selected prefix.
 
 ### Using git-it through Dots
 
 On Termux, Linux, and WSL, an initialized Dots plugin provides
 `dots git it …` from the caller’s working directory. For example,
 `dots git it -R --https` runs the same query as `git-it -R --https`.
-Dots setup can acquire its recorded submodule using
-`dots files install --with-source git-it`. Standalone installation also works
-outside Dots.
+Run `dots files install --component git-it` to link the user-local executable,
+manual and Bash, Zsh and Fish completions to the initialized submodule.
+Edits to `$DOTS/plugins/git-it` take effect on the next invocation of either
+command. In a fresh Dots checkout, use
+`dots files install --with-source git-it --component git-it` to acquire its
+recorded revision.
 
 ## Inspection and prompt formatting
+
+Run `git-it` in a worktree for repository info. If it or a registered
+submodule has local file changes, a grouped status section follows. Missing or
+unreadable children also appear and give the report exit status 1. A clean
+branch ahead of or behind its upstream shows the info section alone.
+`git-it -C DIR` and presentation options select the same default. Use
+`git-it info` for metadata alone, or `git-it status` to include clean
+repositories. Outside a worktree the default prints a diagnostic and usage to
+stderr and exits 3.
 
 ```bash
 git-it
@@ -253,7 +267,9 @@ git-it status --outermost --json
 registered submodules parent first. The grouped view shows branch, worktree
 state, file counts and cached upstream divergence. Renames and copies retain
 both paths. Select `--view default|short|verbose`, or use `--short` or
-`-v`. `--full-paths` expands human paths. The report uses local tracking refs
+`-v`. Human info and status abbreviate paths inside your home directory with
+`~`. Use `status --full-paths` for literal absolute paths. JSON, single fields
+and format strings retain their path values. The report uses local tracking refs
 and never fetches, initializes children, or refreshes the index.
 
 Status JSON has `schema: 1`, `remote_state: "cached"`, ordered `repositories`,

@@ -1,4 +1,5 @@
 """Standalone presentation and lazy Dots integration, with test-owned inputs."""
+import json
 import os
 import pty
 import re
@@ -70,6 +71,35 @@ class PresentationTests(unittest.TestCase):
             with self.subTest(args=args):
                 self.assertNotEqual(self.cli("--color=always", *args, ok=False).returncode, 0)
                 self.assertFalse(self.probes.exists())
+
+    def test_home_paths_in_human_info_and_status(self):
+        home = self.fixture.repo("user home")
+        child = self.fixture.sub(home, self.repo, "child")
+        env = dict(self.env, HOME=str(home) + "/")
+
+        def child_cli(*args):
+            return self.fixture.cli(child, *args, env=env).stdout
+
+        info = child_cli("info", "-v")
+        self.assertRegex(info, r"(?m)^  Root +~/child$")
+        self.assertRegex(info, r"(?m)^  Parent +~$")
+        self.assertRegex(info, r"(?m)^  Outermost +~$")
+        self.assertIn("\n    ~\n    ~/child\n", info)
+        self.assertNotIn(str(home), info.split("Verified ancestry", 1)[1])
+        (child / "new file").touch()
+        status = child_cli("status", "-v")
+        self.assertRegex(status, r"(?m)^  Path +~/child$")
+        self.assertIn("\n      new file\n", status)
+        full = child_cli("status", "-v", "--full-paths")
+        self.assertIn(str(child / "new file"), full)
+        self.assertRegex(full, r"(?m)^  Path +" + re.escape(str(child)) + "$")
+        self.assertEqual(child_cli("--get", "root"), str(child) + "\n")
+        self.assertEqual(child_cli("--format", "{root}"), str(child) + "\n")
+        self.assertEqual(child_cli("path"), str(child) + "\n")
+        self.assertEqual(json.loads(child_cli("status", "--json"))["repositories"][0]["path"], str(child))
+
+        sibling = self.fixture.repo("user home-more")
+        self.assertIn(str(sibling), self.fixture.cli(sibling, "info", env=env).stdout)
 
     def test_missing_dots_and_invalid_published_style_fall_back(self):
         self.env["DOTS"] = str(self.fixture.base / "missing")

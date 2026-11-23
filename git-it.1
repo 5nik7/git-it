@@ -9,10 +9,18 @@ A Bash 5+ command for Termux and Linux. Inspection is local. Recursive
 operations
 follow registered submodules. Completed work is retained after partial
 failure.
+.PP
+With no command, show repository info followed by a status section for local
+changes in the worktree and its registered submodules.
+Clean repositories are omitted from that section.
+Missing or unreadable children appear and give exit status 1.
+Branch divergence alone leaves the worktree clean.
+Directory and presentation options also select this default.
+Outside a worktree it prints a diagnostic and usage to stderr and exits 3.
 .SH COMMANDS
 .TP
 .B info
-Show a local repository summary. This is the default command.
+Show the local repository summary alone.
 .TP
 .B path
 Show the current root, or format verified repository ancestry.
@@ -147,6 +155,8 @@ Help requires no Git repository.
 Human output follows the active Dots profile when available, including its help
 styles, Git and file colors, icons and layout.
 Standalone defaults apply elsewhere.
+Human info and status abbreviate home paths using a tilde.
+Use status --full-paths for literal absolute paths.
 Operations show the root once and relative descendant paths; a dot means the
 operation root. Routine successes use one line unless verbose output is enabled.
 .PP
@@ -225,8 +235,11 @@ Uninstall removes unchanged managed files and preserves modified files.
 Dots can run this same program via
 .B dots git it
 on Termux, Linux and WSL. Its setup includes the plugin when the recorded
-submodule is initialized. Use dots files install --with-source git-it to
-acquire it explicitly. The plugin starts in the caller's working directory.
+submodule is initialized. Run dots files install --component git-it to link
+the user-local command, manual and completions to the plugin checkout.
+Edits there take effect on the next invocation.
+Add --with-source git-it to acquire the recorded revision on a fresh checkout.
+The plugin starts in the caller's working directory.
 .SH SAFETY
 No automatic stash, reset, clean, force-push, or branch selection. Pinned
 checkout

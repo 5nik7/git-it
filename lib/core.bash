@@ -97,13 +97,14 @@ ui_error() {
 help() {
     ui_prepare
     local line label detail
+    printf '\n'
     # DATA comes from the launcher and identifies its source or installed assets.
     # shellcheck disable=SC2153
     if [[ -f $DATA/logo.txt && -r $DATA/logo.txt && -s $DATA/logo.txt ]]; then
         while IFS= read -r line || [[ -n $line ]]; do ui_logo_line "$line"; done < "$DATA/logo.txt"
-        ui_help_span description "Version $VERSION"; printf '\n'
+        printf ' '; ui_help_span description "Version $VERSION"; printf '\n'
     else
-        ui_heading "git-it $VERSION"
+        ui_logo_line "git-it $VERSION"
     fi
     printf '\n'
     while IFS= read -r line; do
@@ -118,11 +119,13 @@ help() {
             *) ui_help_span description "$line"; printf '\n' ;;
         esac
     done <<'EOF'
-Usage: git-it [global options] COMMAND [options]
+Usage: git-it [global options] [COMMAND] [options]
        git-it -i | --icon
 
+With no command, show repository info and any local changes.
+
 Commands:
-  info                    Local repository and remote summary (default)
+  info                    Local repository and remote summary
   path                    Verified repository ancestry and directory fields
   status, -s, --status    Local changes in the repository and its submodules
   sync, --sync            Update parent, then nested submodules
@@ -277,6 +280,9 @@ main() {
         GET=https_url
     fi
     ((selector <= 1 && (LIST_FIELDS == 0 || selector == 0))) || die 2 'choose only one output selector'
+    if ((command_set == 0 && selector == 0 && !LIST_FIELDS && NEWLINE)) && [[ -z $REMOTE_ARG ]]; then
+        CMD=overview
+    fi
     if [[ $CMD == status ]]; then
         if ((VERBOSE)); then status_view verbose; fi
         if ((!NEWLINE || ICON + FORMAT_SET + LIST_FIELDS + DRY_RUN + ALL + YES != 0)) || [[ -n $GET || -n $REMOTE_ARG || -n $MESSAGE ]]; then
@@ -312,10 +318,18 @@ main() {
     TARGET=$REPLY
     if ! repo_root "$TARGET"; then
         if ((ICON || FORMAT_SET)); then return 0; fi
+        if [[ $CMD == overview ]]; then
+            { colors; ui_error 'git-it' 'not inside a Git worktree'; help; } >&2
+            return 3
+        fi
         die 3 'not inside a Git worktree'
     fi
     ROOT=$REPLY
-    if [[ $CMD == status ]]; then
+    if [[ $CMD == status || $CMD == overview ]]; then
+        if [[ $CMD == overview ]]; then
+            inspect_main || return
+            if ((VERBOSE)); then STATUS_VIEW=verbose; fi
+        fi
         # shellcheck source=lib/status.bash
         source "$LIB/status.bash"
         status_main

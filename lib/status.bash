@@ -45,11 +45,10 @@ status_discover() {
     fi
 }
 
-status_snapshot() {
-    local dir=$1 row xy i ignore=none
-    branch='' tracking='' ahead=null behind=null paths=() codes=() oldpaths=()
-    state=${unavailable[$dir]:-clean}
-    [[ $state == clean ]] || return 0
+status_tracking() {
+    local dir=$1
+    branch='' tracking='' ahead=null behind=null
+    [[ ! ${unavailable[$dir]+set} ]] || return 0
     if text_cmd git -C "$dir" symbolic-ref --quiet --short HEAD 2>/dev/null; then branch=$REPLY
     elif text_cmd git -C "$dir" rev-parse --verify --short HEAD 2>/dev/null; then branch="detached $REPLY"; fi
     if text_cmd git -C "$dir" rev-parse --symbolic-full-name '@{upstream}' 2>/dev/null; then
@@ -58,6 +57,13 @@ status_snapshot() {
             read -r ahead behind <<< "$REPLY"
         fi
     fi
+}
+
+status_snapshot() {
+    local dir=$1 row xy i ignore=none
+    paths=() codes=() oldpaths=()
+    state=${unavailable[$dir]:-clean}
+    [[ $state == clean ]] || return 0
     [[ ! ${skip_submodules[$dir]+set} ]] || ignore=all
     if ! records_cmd git -C "$dir" -c core.fsmonitor=false status --porcelain=v1 -z \
         --untracked-files=all --ignore-submodules="$ignore" 2>/dev/null; then
@@ -123,7 +129,7 @@ status_human_row() {
     ui_spans 2 "${spans[@]}"
     [[ ! ${reasons[$dir]+set} ]] || ui_field Reason "${reasons[$dir]}"
     if [[ $view == verbose && ! ${unavailable[$dir]+set} ]]; then
-        ui_field Path "$dir"
+        ui_field Path "$dir" path
         head=unborn; if text_cmd git -C "$dir" rev-parse --verify HEAD 2>/dev/null; then head=$REPLY; fi
         ui_field HEAD "$head"; ui_field Upstream "${tracking:-unavailable}"
         ui_field Remote "${REMOTE:-unavailable}"; ui_field URL "${SAFE_URL:-unavailable}"
@@ -152,11 +158,21 @@ status_main() {
     progress_stop
     total=${#status_dirs[@]}
     if ((JSON)); then printf '{"schema":1,"remote_state":"cached","repositories":['
-    else ui_heading 'Git status'; fi
+    elif [[ $CMD != overview ]]; then ui_heading 'Git status'; fi
     for dir in "${status_dirs[@]}"; do
         progress_start 'Inspecting repositories' "$inspected" "$total"
         status_snapshot "$dir"
+        if [[ $CMD == overview && $state == clean ]]; then
+            progress_stop
+            ((inspected+=1))
+            continue
+        fi
+        status_tracking "$dir"
         progress_stop
+        if [[ $CMD == overview && $changed == 0 ]]; then
+            printf '\n'
+            ui_heading 'Git status'
+        fi
         [[ $state == clean ]] || ((changed+=1))
         [[ $state != blocked && $state != missing ]] || incomplete=1
         if ((JSON)); then
@@ -167,7 +183,7 @@ status_main() {
     done
     if ((JSON)); then
         if ((incomplete)); then printf '],"complete":false}\n'; else printf '],"complete":true}\n'; fi
-    else
+    elif [[ $CMD != overview || $changed != 0 ]]; then
         ui_line "$total repositories / $changed changed or unavailable / $((total - changed)) clean" '' 2
         ui_line 'Remote state uses local tracking refs; no fetch performed.' '' 2
     fi

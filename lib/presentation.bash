@@ -250,7 +250,21 @@ ui_help_syntax() {
 ui_help_row() { ui_field "$1" "$2" help; }
 
 ui_logo_line() {
+    printf ' '
     display "$1"; ui_help_span heading "$REPLY"; printf '\n'
+}
+
+# Only human filesystem labels use a literal tilde. Git and format fields keep
+# the original path, including when this label contains whitespace or controls.
+# shellcheck disable=SC2088
+ui_path() {
+    local home=${HOME:-} prefix
+    REPLY=$1
+    [[ $home == /* && ${FULL_PATHS:-0} == 0 ]] || return 0
+    while [[ $home != / && $home == */ ]]; do home=${home%/}; done
+    prefix=${home%/}/
+    if [[ $1 == "$home" ]]; then REPLY='~'
+    elif [[ $1 == "$prefix"* ]]; then REPLY="~/${1#"$prefix"}"; fi
 }
 
 ui_columns() {
@@ -330,6 +344,8 @@ ui_field() {
         value=${2:-}; ui_help_style description; value_color=$REPLY
         ui_help_tokens "$label" label_spans
         if [[ -z $value ]]; then ui_spans "$indent" "${label_spans[@]}"; return; fi
+    elif [[ ${3:-} == path ]]; then
+        ui_path "$value"; value=$REPLY
     fi
     ui_columns
     ((indent <= UI_COLUMNS-8)) || indent=$((UI_COLUMNS-8))

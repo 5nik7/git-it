@@ -224,7 +224,7 @@ inspect_main() {
             ui_prepare
             if [[ $OWNED == true ]]; then ui_git_style repo_owned; else ui_git_style repo; fi
             ui_heading "Repository ${ROOT##*/}" "$REPLY"
-            ui_field Root "$ROOT"
+            ui_field Root "$ROOT" path
             ui_field Remote "$REMOTE"
             ui_field Host "$HOST"
             ui_field Owner "$OWNER"
@@ -238,9 +238,9 @@ inspect_main() {
                 ui_field Protocol "$PROTOCOL"
                 printf '\n'
                 ui_heading 'Verified ancestry'
-                ui_field Parent "${F[parent]:-None}"
-                ui_field Outermost "${F[outermost]}"
-                for key in "${CHAIN[@]}"; do ui_detail "$key"; done
+                ui_field Parent "${F[parent]:-None}" path
+                ui_field Outermost "${F[outermost]}" path
+                for key in "${CHAIN[@]}"; do ui_path "$key"; ui_detail "$REPLY"; done
             fi
             return 0
         fi

@@ -120,7 +120,8 @@ class CliTest(unittest.TestCase):
                 if '\x1b' in image:
                     self.assertNotIn('\x1b', help_text)
                 else:
-                    self.assertTrue(help_text.startswith(image + '\n'), repr(help_text[:70]))
+                    padded = '\n' + ''.join(' ' + row + '\n' for row in image.split('\n'))
+                    self.assertTrue(help_text.startswith(padded + ' Version '), repr(help_text[:70]))
                 self.assertIn('Usage:', help_text)
             for shell in ('bash', 'zsh', 'fish'):
                 result = self.fixture.run_cmd(['bash', str(alias), '--completion', shell])
@@ -131,6 +132,7 @@ class CliTest(unittest.TestCase):
         logo.unlink()
         os.mkfifo(logo)
         fallback = self.fixture.run_cmd(['bash', str(source/'git-it'), '--no-color', '--help'])
+        self.assertTrue(fallback.stdout.startswith('\n git-it '))
         self.assertIn('Usage:', fallback.stdout)
         fresh = self.fixture.base / 'new prefix'
         failed = self.fixture.run_cmd(['bash', str(source/'install.sh'), '--prefix', str(fresh)], ok=False)

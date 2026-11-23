@@ -54,6 +54,24 @@ class StatusTests(unittest.TestCase):
         self.assertNotIn("SECRET", verbose)
         self.assertNotIn("PRIVATE", verbose)
 
+    def test_dirty_submodules_include_clean_child_at_a_different_gitlink(self):
+        parent = self.fixture.repo("parent")
+        child = self.fixture.sub(parent, self.fixture.repo("child-source"), "nested/child")
+        flags = ("submodules", "status", "--dirty")
+        self.assertEqual(json.loads(self.cli(parent, *flags, "--json").stdout)["repositories"], [])
+
+        (child / "file").write_text("new revision\n")
+        self.git(child, "commit", "-am", "move child away from parent gitlink")
+        report = json.loads(self.cli(parent, *flags, "--json").stdout)
+        self.assertEqual([(row["path"], row["status"]) for row in report["repositories"]], [(str(child), "clean")])
+        self.assertTrue(report["complete"])
+        report = self.cli(parent, *flags, "--view", "default").stdout
+        self.assertIn("differs from parent index", report)
+        self.assertIn("child", report)
+
+        self.git(parent, "add", "nested/child")
+        self.assertEqual(json.loads(self.cli(parent, *flags, "--json").stdout)["repositories"], [])
+
     def test_registered_children_detached_missing_and_outermost(self):
         source = self.fixture.repo("source")
         root = self.fixture.repo("super")

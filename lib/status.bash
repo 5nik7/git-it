@@ -27,7 +27,7 @@ status_discover() {
     if ((${#paths[@]})); then submodule_registrations "$dir" by_path status 2>/dev/null || registered=0; fi
     for i in "${!paths[@]}"; do
         path=${paths[i]}; child=${dir%/}/$path
-        status_parent[$child]=$dir; status_depth[$child]=$(($2 + 1))
+        status_parent[$child]=$dir; status_depth[$child]=$(($2 + 1)); recorded[$child]=${oids[i]}
         if [[ ! ${oids[i]} ]]; then
             status_dirs+=("$child"); unavailable[$child]=blocked; reasons[$child]='Unresolved submodule index entry'
             unsafe=1
@@ -156,9 +156,11 @@ status_tree_row() {
     if [[ $state == @(missing|blocked|conflict) || $view == verbose ]]; then ui_git_style "$state"; spans+=("  $state" "$REPLY"); fi
     local UI_WRAP_GUTTER="$bar "
     ui_spans 0 "${spans[@]}"
+    if [[ ${pointer_changed[$dir]:-} ]]; then ui_spans 0 "$bar Pointer  " "$YELLOW" 'differs from parent index' ''; fi
     if [[ -n ${reasons[$dir]:-} ]]; then ui_spans 0 "$bar Reason  " "$YELLOW" "${reasons[$dir]}" ''; fi
-    if [[ $state != @(missing|blocked) && ( $view == verbose || $view != short && ( $dir == "$ROOT" ) ) ]]; then
+    if [[ $state != @(missing|blocked) && ( $view == verbose || $view != short && $dir == "$ROOT" ) ]]; then
         ui_path "$dir"
+        if [[ -z $HOST || $PROTOCOL == file ]]; then OWNER=''; fi
         fields=(Host "$HOST" Protocol "${URL:+$PROTOCOL}" Remote "$REMOTE" Upstream "${tracking#refs/remotes/}" Owner "$OWNER" Root "$REPLY")
         if [[ $view == verbose ]]; then
             head=unborn; if text_cmd git -C "$dir" rev-parse --verify HEAD 2>/dev/null; then head=$REPLY; fi
@@ -219,7 +221,7 @@ status_human_row() {
 status_main() {
     local -a status_dirs=() paths=() codes=() oldpaths=()
     local -A unavailable=() skip_submodules=() reasons=()
-    local -A status_parent=() status_depth=() last_child=() name_counts=() states=() starts=() sizes=()
+    local -A recorded=() pointer_changed=() status_parent=() status_depth=() last_child=() name_counts=() states=() starts=() sizes=()
     local -a visible=() file_paths=() file_codes=() file_oldpaths=()
     local dir branch tracking ahead behind state view total inspected=0 changed=0 incomplete=0 tree=0
     local parent idx count row_prefix detail_prefix
@@ -246,8 +248,12 @@ status_main() {
         status_snapshot "$dir"
         ((inspected+=1))
         progress_stop
-        if [[ $state == clean && ( $CMD == overview || ${DIRTY_ONLY:-0} == 1 ) ]]; then continue; fi
-        [[ $state == clean ]] || ((changed+=1))
+        if [[ ${REPORT_SUBMODULES:-0} == 1 && $state != @(missing|blocked) && -n ${recorded[$dir]:-} ]] &&
+            text_cmd git -C "$dir" rev-parse --verify HEAD 2>/dev/null && [[ $REPLY != "${recorded[$dir]}" ]]; then
+            pointer_changed[$dir]=1
+        fi
+        if [[ $state == clean && ! ${pointer_changed[$dir]:-} && ( $CMD == overview || ${DIRTY_ONLY:-0} == 1 ) ]]; then continue; fi
+        [[ $state == clean && ! ${pointer_changed[$dir]:-} ]] || ((changed+=1))
         [[ $state != blocked && $state != missing ]] || incomplete=1
         visible+=("$dir"); states[$dir]=$state
         starts[$dir]=${#file_paths[@]}; sizes[$dir]=${#paths[@]}

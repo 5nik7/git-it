@@ -119,7 +119,9 @@ Local preview with no network or repository writes. Remote state is unknown.
 Publish tracked and untracked changes, respecting ignore rules.
 .TP
 .BI "-m, --message " MESSAGE
-Commit message. Default: Sync via HOST on UTC TIMESTAMP.
+Set the commit message. The default is "Sync via NAME on TIMESTAMP" in UTC.
+NAME comes from the DOTS_PROFILE environment variable when set and nonempty,
+otherwise from the hostname.
 .TP
 .B --yes
 Accept publication preview. Required for noninteractive publication.

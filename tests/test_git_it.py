@@ -324,6 +324,30 @@ printf '%s\n' "${COMPREPLY[@]}"
         self.assertEqual(self.cli(top / "middle", "sync", ok=False).returncode, 1)
         self.cli(top / "middle", "sync", "--outermost")
 
+    def test_publish_commit_message_uses_profile_or_hostname(self):
+        _, bare, repo = self.remote_repo("publish-message")
+        self.owned_remote(repo, bare)
+        for profile, override in ((None, None), ("", None), ("phone", None), ("phone", "manual message")):
+            with self.subTest(profile=profile, override=override):
+                env = dict(self.env, HOSTNAME="fixture-host")
+                if profile is not None:
+                    env["DOTS_PROFILE"] = profile
+                with (repo / "file").open("a") as changed:
+                    changed.write("change\n")
+                self.git(repo, "add", "file")
+                options = ["-m", override] if override else []
+                result = self.cli(repo, "publish", "--yes", "--json", *options, env=env)
+                message = self.git(bare, "log", "-1", "--format=%s", "main")
+                if override:
+                    self.assertEqual(message, override)
+                else:
+                    name = profile or "fixture-host"
+                    timestamp = r"\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC"
+                    self.assertRegex(message, rf"^Sync via {name} on {timestamp}$")
+                events = json.loads(result.stdout)["events"]
+                self.assertTrue(any(event["detail"].endswith("; message: " + message)
+                                    for event in events if event["status"] == "planned"))
+
     def test_publish_staged_only_and_existing_commits(self):
         _, bare, repo = self.remote_repo("publish")
         self.owned_remote(repo, bare)

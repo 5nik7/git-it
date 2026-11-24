@@ -593,7 +593,8 @@ operations_main() {
         fi
         command -v sha256sum >/dev/null 2>&1 || die 3 'publishing requires sha256sum'
         if [[ -z $MESSAGE ]]; then
-            text_cmd date -u '+%Y-%m-%d %H:%M UTC'; MESSAGE="Sync via ${HOSTNAME:-unknown} on $REPLY"
+            text_cmd date -u '+%Y-%m-%d %H:%M UTC'
+            MESSAGE="Sync via ${DOTS_PROFILE:-${HOSTNAME:-unknown}} on $REPLY"
         fi
         progress_start 'Discovering repositories'
         for selected in "${OP_ROOTS[@]}"; do

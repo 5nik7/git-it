@@ -175,7 +175,8 @@ Recursive operations:
   sync --init             Allow initializing missing submodules
   sync --remote           Advance submodules to explicitly configured branches
   publish --all           Include tracked and untracked changes, not just staged
-  publish -m MESSAGE      Commit message (default: Sync via HOST on TIMESTAMP)
+  publish -m MESSAGE      Set the commit message (default uses DOTS_PROFILE
+                          or hostname, with a UTC timestamp)
   publish --yes           Accept the preview without an interactive question
 
 Sync continues safe siblings when a subtree is blocked. Publish blocks parents

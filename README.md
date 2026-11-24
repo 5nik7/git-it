@@ -335,6 +335,9 @@ Publish previews selections, messages and destinations, then asks once. Unattend
 callers need `--yes`. Defaults to staged changes. `--all` explicitly stages tracked
 and untracked changes, respecting ignore rules. Existing ahead commits also push.
 
+Without `-m` or `--message`, the commit message is `Sync via <name> on <UTC timestamp>`.
+The name comes from `DOTS_PROFILE` when set and nonempty, otherwise from the hostname.
+
 Children publish before parents. Successfully published child pointers are staged
 in their parent, without replacing a deliberately staged different pointer.
 Failed children block dependent parents; independent siblings continue. Unchanged

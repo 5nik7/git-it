@@ -48,8 +48,12 @@ status_file_line() {
     fi
     if [[ ${TREE_FILES:-0} == 1 ]]; then
         local edge=$TREE_FORK edge_color=${guide_colors[${codes[i]}]}
-        local UI_WRAP_GUTTER=$TREE_GUTTER UI_WRAP_EDGE="$TREE_BAR " UI_WRAP_EDGE_COLOR=$edge_color
-        if [[ $i == "$last" ]]; then edge=$TREE_END; UI_WRAP_EDGE='  '; UI_WRAP_EDGE_COLOR=''; fi
+        local wrap_edge="$TREE_BAR " wrap_color=$edge_color
+        if [[ $i == "$last" ]]; then
+            edge=$TREE_END
+            wrap_edge='  '
+            wrap_color=''
+        fi
         local -a segments=("$TREE_GUTTER" "$TREE_COLOR" "$edge " "$edge_color" "$prefix" '')
         local value shown style file_icon
         for value in "${oldpaths[$i]}" "${paths[$i]}"; do
@@ -63,7 +67,9 @@ status_file_line() {
             fi
             segments+=("$shown" "$style")
         done
-        ui_spans 0 "${segments[@]}"; return
+        UI_WRAP_GUTTER=$TREE_GUTTER UI_WRAP_EDGE=$wrap_edge UI_WRAP_EDGE_COLOR=$wrap_color \
+            ui_spans 0 "${segments[@]}"
+        return
     fi
     ui_file_style "$actual"
     ui_line "$prefix${UI_FILE_ICON:+$UI_FILE_ICON }${old:+$old -> }$path" "$REPLY" 6

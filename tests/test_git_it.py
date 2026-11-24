@@ -739,10 +739,12 @@ printf '%s\n' "${COMPREPLY[@]}"
             preview = self.cli(repo, "publish", "--dry-run", "-m", "review this", *flags).stdout
             self.assertIn("Preview\n", preview)
             self.assertIn("Staged changes", preview)
-            self.assertIn("Branch   main\n", preview)
+            for key, value in (("Branch", "main"), ("Target", "refs/heads/main"), ("Message", "review this")):
+                if flags:
+                    self.assertRegex(preview, rf"(?m)^  │ {key} +{value} +│$")
+                else:
+                    self.assertIn(f"    {key:<7}  {value}\n", preview)
             self.assertIn("Push to  ssh://example.invalid", preview)
-            self.assertIn("Target   refs/heads/main\n", preview)
-            self.assertIn("Message  review this\n", preview)
             heading = "[A ] staged added (1)" if flags else "staged added (1)"
             self.assertIn(("  " if flags else "    ") + heading + "\n", preview)
             self.assertIn(("  └ " if flags else "      ") + r"selected space\x09line\x0aend", preview)

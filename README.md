@@ -185,9 +185,9 @@ a terminal and no `NO_COLOR`; explicit always overrides that variable.
 Human reports use aligned labels and semantic colors. With Dots available,
 git-it reads the active help, icon, layout, and progress preferences and the
 published Git and file styles. A standalone installation has built-in defaults.
-In a status tree, the outer guides and metadata box border use the theme's
-`dark_foreground` (gray in standalone mode). The inner `├`, `└`, and wrapped
-`│` use the file's Git status foreground. For example, the file guides under
+Terminal reports start with one blank line. In a status tree, the outer guides
+and metadata box border use the theme's `dark_foreground` (gray in standalone
+mode). The inner `├`, `└`, and wrapped `│` use the file's Git status foreground. For example, the file guides under
 `unstaged modified` follow the modified color. These guides remain visible
 with icons or color turned off.
 CLI color options control the destination stream. Metadata, JSON, formats,
@@ -203,10 +203,12 @@ git-it publish --dry-run -v       # detailed local publication preview
 ```
 
 Default operation output shows the root once, then uses `.` for that root and
-relative paths for descendants. Routine execution successes occupy one line;
-verbose mode adds their explanations and uses full paths. Blockers and failures
-always include their reasons. Publish previews show selected files, branches, destinations,
-messages, and child-pointer caveats. Dry-run limits remain visible in both modes.
+relative paths for descendants. Terminal reports group settings and explanations
+in boxes. Each publish preview puts its branch, push URL, target ref and commit
+message together above the selected files. Routine execution successes occupy one
+line. Verbose mode adds their explanations and uses full paths. Blockers and
+failures always include their reasons. Previews include child-pointer caveats
+and dry-run limits in both modes.
 Publication preview and execution have separate headings, followed by a result
 that distinguishes completion, partial failure, and cancellation.
 
@@ -270,7 +272,18 @@ both paths. Select `--view default|short|verbose`, or use `--short` or
 and format strings retain their path values. The report uses local tracking refs
 and never fetches, initializes children, or refreshes the index.
 
-The default terminal view shows the root host, protocol, remote, upstream, owner and path in a box. Each repository row identifies its branch or detached commit. The 󱦲 and 󱦳 counters show nonzero ahead and behind counts from local tracking refs. GitHub submodules use , other submodules use , and a Wiki uses 󱔘. Files are grouped by their full index and worktree state. `git-it -s` selects status and `git-it status -s` selects the short view.
+The default terminal view shows the root host, protocol, remote, upstream,
+owner and path in a box. Each repository row identifies its branch or detached
+commit. The 󱦲 and 󱦳 counters show nonzero ahead and behind counts from local
+tracking refs. GitHub submodules use , other submodules use , and a Wiki uses 󱔘.
+
+Adjacent submodules share consecutive rows. The last direct submodule uses
+`├` when the Wiki follows and `└` when it ends the tree. A repository displayed
+alone starts its metadata box at the left edge. Submodule reports show the
+original target repository and its branch above the selected repositories,
+including when a filter produces an empty list. Files are grouped by their full
+index and worktree state. `git-it -s` selects status and `git-it status -s`
+selects the short view.
 
 ```bash
 git-it submodules --depth 1

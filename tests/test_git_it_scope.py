@@ -11,6 +11,46 @@ class ScopeTests(unittest.TestCase):
         self.f.setUp()
         self.addCleanup(self.f.doCleanups)
 
+    def test_visible_tree_guides_and_display_only_context(self):
+        f = self.f
+        root = f.repo('project')
+        wiki = f.repo('project.wiki')
+        for repo in (root, wiki):
+            f.git(repo, 'remote', 'add', 'origin', f'https://example.invalid/team/{repo.name}.git')
+        env = dict(f.env, DOTS_MENU_CAPTURE='1', DOTS_ICONS='never', COLUMNS='100')
+
+        def report(*args):
+            return f.cli(root, *args, '--no-color', env=env).stdout.splitlines()
+
+        self.assertEqual(report('status', '--short'), ['', 'project main', '│', 'project.wiki main'])
+        self.assertEqual(report('status', '--short', '--no-wiki'), ['', 'project main'])
+        self.assertEqual(report('submodules', '--short')[:2], ['', 'project main'])
+        self.assertNotIn('│', report('submodules', '--short'))
+        leaf, middle = f.repo('leaf'), f.repo('middle')
+        f.sub(middle, leaf, 'nested')
+        f.sub(root, leaf, 'one')
+        f.sub(root, middle, 'two')
+        f.git(root, 'submodule', 'update', '--init', '--recursive')
+        head = f.git(root/'two/nested', 'rev-parse', '--short', 'HEAD')
+        self.assertEqual(report('status', '--short'), [
+            '', 'project main', '│', '├ one main', '├ two main', f'│ └ nested {head}',
+            '│', 'project.wiki main'])
+        children = ['├ one main', '└ two main', f'  └ nested {head}']
+        for args in [('status', '--no-wiki'), ('submodules',), ('submodules', 'info'), ('submodules', 'status')]:
+            with self.subTest(args=args):
+                self.assertEqual(report(*args, '--short'), ['', 'project main', '│', *children])
+        for args in [('submodule', 'two:nested', 'status'), ('submodules', 'status', 'two/nested')]:
+            self.assertEqual(report(*args, '--short'), ['', 'project main', '│', f'└ nested {head}'])
+        self.assertEqual(report('submodules', 'status', '--dirty', '--short')[:2], ['', 'project main'])
+        scoped = report('submodule', 'one', 'publish', '--dry-run')
+        self.assertEqual(scoped[:3], ['', 'project main', 'Publish'])
+        raw = f.cli(root, 'submodules', 'status', '--json').stdout
+        self.assertTrue(raw.startswith('{'))
+        self.assertNotIn(str(root), [r['path'] for r in json.loads(raw)['repositories']])
+        # An ordinary piped collection retains its existing row separators.
+        self.assertEqual(f.cli(root, 'submodules', '--depth', '1').stdout.splitlines(),
+                         ['├ one main', '│', '└ two main'])
+
     def test_registered_selection_names_paths_depth_and_forest(self):
         f = self.f
         root, mid, leaf = (f.repo(name) for name in ('project', 'middle', 'leaf'))

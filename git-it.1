@@ -169,13 +169,19 @@ styles, Git and file colors, icons and layout.
 Standalone defaults apply elsewhere.
 Human info and status abbreviate home paths using a tilde.
 Use status --full-paths for literal absolute paths.
-Default info and status start with the root metadata box and compact repository
-rows. Status groups files by their complete index and worktree state.
+Terminal reports open with one blank line. Default info and status show the
+root heading and metadata box, followed by consecutive submodule rows. The
+last submodule's guide continues to the Wiki when it is displayed. A lone
+repository omits the outer guide. Submodule reports name the originally
+targeted repository and branch above the selected results.
+Status groups files by their complete index and worktree state.
 Operations show the root once and relative descendant paths; a dot means the
 operation root. Routine successes use one line unless verbose output is enabled.
 .PP
 Blocker and failure reasons, publication selections and destinations, commit
 messages, child-pointer caveats, and dry-run uncertainty are always visible.
+Terminal boxes group operation settings, per-repository planning fields and
+result explanations. File lists and confirmation prompts appear outside them.
 Publication preview and execution have separate headings. Final results identify
 completion, incomplete work, previews, and cancellation.
 .PP

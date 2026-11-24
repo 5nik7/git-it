@@ -1,10 +1,13 @@
 """Standalone presentation and lazy Dots integration, with test-owned inputs."""
+import fcntl
 import json
 import os
 import pty
 import re
 import select
+import struct
 import subprocess
+import termios
 import unittest
 
 import test_git_it as fixtures
@@ -75,7 +78,7 @@ class PresentationTests(unittest.TestCase):
         self.assertEqual(self.probes.read_text(), "probe\nprobe\n")
         self.prefs.write_text("__git.view\tverbose\tliteral\n__format.label_width\t14\tformatting\n"
                               "__format.indent\t3\tformatting\n")
-        self.assertRegex(self.cli("status").stdout, r"(?m)^││ Root +/")
+        self.assertRegex(self.cli("status").stdout, r"(?m)^│ Root +/")
 
     def test_default_scalar_and_structured_routes_skip_dots(self):
         (self.repo / "example.xyz").touch()
@@ -100,16 +103,16 @@ class PresentationTests(unittest.TestCase):
             return self.fixture.cli(child, *args, env=env).stdout
 
         info = child_cli("info", "-v")
-        self.assertRegex(info, r"(?m)^││ Root +~/child +│$")
-        self.assertRegex(info, r"(?m)^││ Parent +~ +│$")
-        self.assertRegex(info, r"(?m)^││ Outermost +~ +│$")
+        self.assertRegex(info, r"(?m)^│ Root +~/child +│$")
+        self.assertRegex(info, r"(?m)^│ Parent +~ +│$")
+        self.assertRegex(info, r"(?m)^│ Outermost +~ +│$")
         (child / "new file").touch()
         status = child_cli("status", "-v")
-        self.assertRegex(status, r"(?m)^││ Root +~/child +│$")
-        self.assertIn("\n│ └ new file\n", status)
+        self.assertRegex(status, r"(?m)^│ Root +~/child +│$")
+        self.assertIn("\n└ new file\n", status)
         full = child_cli("status", "-v", "--full-paths")
         self.assertIn(str(child / "new file"), full)
-        self.assertRegex(full, r"(?m)^││ Root +" + re.escape(str(child)) + r" +│$")
+        self.assertRegex(full, r"(?m)^│ Root +" + re.escape(str(child)) + r" +│$")
         self.assertEqual(child_cli("--get", "root"), str(child) + "\n")
         self.assertEqual(child_cli("--format", "{root}"), str(child) + "\n")
         self.assertEqual(child_cli("path"), str(child) + "\n")
@@ -184,8 +187,8 @@ class PresentationTests(unittest.TestCase):
                         DOTS_MENU_CAPTURE="1", DOTS_ICONS="never")
         (self.repo / "new").touch()
         rows = dict(styled_lines(self.cli("status", "--color=always").stdout))
-        colors = rows["│ └ new"]
-        self.assertEqual((colors[0], colors[2]), ("90", "95"))
+        colors = rows["└ new"]
+        self.assertEqual(colors[0], "95")
 
     def test_status_wraps_with_sibling_guides_at_terminal_width(self):
         names = ["a" * 150 + ".xyz", "z" * 150 + ".xyz"]
@@ -196,7 +199,7 @@ class PresentationTests(unittest.TestCase):
                 self.env.update(DOTS_MENU_CAPTURE="1", DOTS_ICONS="never", COLUMNS=str(width))
                 rows = styled_lines(self.cli("status", "--color=always").stdout)
                 self.assertTrue(all(len(line) <= width for line, _ in rows))
-                for name, edge, continuation in zip(names, ("│ ├ ", "│ └ "), ("│ │ ", "│   ")):
+                for name, edge, continuation in zip(names, ("├ ", "└ "), ("│ ", "  ")):
                     start = next(i for i, (line, _) in enumerate(rows) if line.startswith(edge + name[0]))
                     shown = rows[start][0][len(edge):]
                     self.assertLess(len(shown), len(name))
@@ -205,11 +208,65 @@ class PresentationTests(unittest.TestCase):
                         i += 1
                         line, colors = rows[i]
                         self.assertTrue(line.startswith(continuation), line)
-                        self.assertEqual(colors[0], "38;5;238", line)
-                        if "│" in continuation[1:]:
-                            self.assertEqual(colors[2], "38;5;165", line)
+                        if continuation.startswith("│"):
+                            self.assertEqual(colors[0], "38;5;165", line)
                         shown += line[len(continuation):]
                     self.assertEqual(shown, name)
+
+    def test_scoped_publish_uses_real_terminal_width_without_columns(self):
+        _, bare, _ = self.fixture.remote_repo("seed")
+        child = self.fixture.sub(self.repo, bare, "child")
+        self.fixture.owned_remote(child, bare)
+        (child / "staged").touch()
+        self.fixture.git(child, "add", "staged")
+        env = dict(self.env, DOTS_ICONS="never", NO_COLOR="1")
+        env.pop("COLUMNS", None)
+        for width in (40, 80, 120):
+            with self.subTest(width=width):
+                master, slave = pty.openpty()
+                try:
+                    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, width, 0, 0))
+                    result = subprocess.run(
+                        [str(fixtures.CLI), "--config", str(self.fixture.config), "-C", str(self.repo),
+                         "submodule", "child", "publish", "--dry-run", "-m", "x" * 140],
+                        stdout=slave, stdin=subprocess.DEVNULL, stderr=subprocess.PIPE, env=env, timeout=40)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    output = bytearray()
+                    while select.select([master], [], [], 0)[0]:
+                        output.extend(os.read(master, 4096))
+                finally:
+                    os.close(master)
+                    os.close(slave)
+                rows = output.decode().splitlines()
+                self.assertEqual(rows[:3], ["", "presentation main", "Publish"])
+                self.assertEqual(max(map(len, rows)), width)
+                self.assertIn("  └ staged", rows)
+
+    def test_operation_plans_wrap_inside_their_boxes(self):
+        _, bare, repo = self.fixture.remote_repo("operation")
+        self.fixture.owned_remote(repo, bare)
+        (repo / "new").touch()
+        self.fixture.git(repo, "add", "new")
+        message = "x" * 55 + "雪\tend"
+        for width in (40, 80, 120):
+            self.env.update(DOTS_MENU_CAPTURE="1", DOTS_ICONS="never", COLUMNS=str(width))
+            rows = self.fixture.cli(repo, "publish", "--dry-run", "-m", message, env=self.env).stdout.splitlines()
+            self.assertEqual(rows[:2], ["", "Publish"])
+            self.assertIn("Preview", rows)
+            self.assertIn("  └ new", rows)
+            fields = [r for r in rows if r.startswith("  │")]
+            self.assertTrue(all(r.endswith("│") for r in fields))
+            for key in ("Root", "Mode", "Preview", "Branch", "Push to", "Target", "Message", "Note"):
+                self.assertTrue(any(r.startswith("  │ " + key + " ") for r in fields), key)
+            start = next(i for i, row in enumerate(fields) if row.startswith("  │ Message "))
+            value_rows = fields[start:]
+            joined = value_rows[0][12:-2].strip()
+            for r in value_rows[1:]:
+                if not r.startswith("  │          "):
+                    break
+                joined += r[12:-2].strip()
+            self.assertEqual(joined, message.replace("\t", r"\x09"))
+            self.assertTrue(all(sum(2 if c == "雪" else 1 for c in r) <= width for r in rows))
 
     def test_terminal_progress_modes_and_streams(self):
         # Give the renderer separate ttys, so its stderr and the permanent

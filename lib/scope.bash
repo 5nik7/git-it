@@ -134,6 +134,7 @@ scope_apply() {
     SCOPE_PARENT='' SCOPE_UNAVAILABLE=0 OP_ROOTS=()
     declare -gA SELECTED_PARENTS=()
     if ((OUTERMOST)); then ancestry; ROOT=${CHAIN[0]}; OUTERMOST=0; fi
+    if (( ${#scope_names[@]} || collection )); then REPORT_CONTEXT=$ROOT; fi
     for name in "${scope_names[@]}"; do
         scope_select "$name" name || die 2 'child name is unknown, ambiguous, or unsafe; use an exact registered path'
         REPORT_KIND=submodule

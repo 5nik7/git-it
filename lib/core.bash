@@ -221,7 +221,7 @@ main() {
     local arg command_set=0 selector=0 show_help=0 show_version=0 completion_shell='' https=0
     local collection=0 need_name=0 scope_path='' all_submodules=0 no_wiki=0 literal=0 query=''
     local -a scope_names=()
-    REPORT_SUBMODULES=0 REPORT_MODE='' REPORT_KIND='' DEPTH_LIMIT='' DIRTY_ONLY=0
+    REPORT_CONTEXT='' REPORT_SUBMODULES=0 REPORT_MODE='' REPORT_KIND='' DEPTH_LIMIT='' DIRTY_ONLY=0
     WIKI_ROOT='' WIKI_SOURCE='' WIKI_ONLY=0 WIKI_DECLARED=0 INIT=0
     CMD=info TARGET=. COLOR=auto COLOR_SET=0 CONFIG=${XDG_CONFIG_HOME:-$HOME/.config}/git-it/config
     NO_CONFIG=0 EXPLICIT_CONFIG=0 REMOTE_ARG='' FORMAT='' FORMAT_SET=0 GET='' JSON=0 ICON=0 NEWLINE=1

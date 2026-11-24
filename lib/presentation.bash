@@ -116,7 +116,8 @@ ui_load_preferences() {
     [[ ${JSON:-0} == 0 ]] || return 0
     local geometry term_columns fd=${1:-1} theme=${XDG_STATE_HOME:-$HOME/.local/state}/dots/current/theme
     if [[ -z ${COLUMNS:-} && -t 1 ]] && command -v stty >/dev/null 2>&1; then
-        geometry=$(stty size <&1 2>/dev/null) && term_columns=${geometry##* } || term_columns=''
+        # Save stdout's terminal before command substitution replaces fd 1.
+        { geometry=$(stty size <&3 2>/dev/null); } 3>&1 && term_columns=${geometry##* } || term_columns=''
         [[ $term_columns =~ ^[1-9][0-9]{0,3}$ ]] && UI_TERM_COLUMNS=$term_columns
     fi
     if [[ -t $fd || ${COLOR:-auto} == always || ${DOTS_COLOR:-} == always ||
@@ -295,9 +296,46 @@ ui_cell_width() {
     else REPLY=1; fi
 }
 
-# Use the tree for a selected human view. Preserve ordinary redirected output.
+# A plain redirected collection historically prints a tree, including its spacers.
+ui_report_active() {
+    [[ -t 1 || ${DOTS_MENU_CAPTURE:-} == 1 || -n ${STATUS_VIEW:-} || ${DOTS_ICONS:-} == always ]]
+}
+
 ui_tree_active() {
-    [[ -t 1 || ${DOTS_MENU_CAPTURE:-} == 1 || -n ${STATUS_VIEW:-} || ${DOTS_ICONS:-} == always || ${REPORT_SUBMODULES:-0} == 1 ]]
+    ui_report_active || [[ ${REPORT_SUBMODULES:-0} == 1 ]]
+}
+
+# Build the same repository and branch spans for a result or its source heading.
+ui_repo_identity() {
+    local -n identity=$1
+    local kind=$2 label=$3 branch_display=$4 state=$5
+    local repo_role=repo branch_role=branch icon
+    [[ $OWNED != true ]] || repo_role=repo_owned
+    case $kind in
+        wiki) ui_icon git.wiki '󱔘' ;;
+        submodule) if [[ $HOST == github.com ]]; then ui_icon git.submodule_github ''; else ui_icon git.submodule ''; fi ;;
+        *) case $HOST in github.com) ui_icon hosts.github "$HOST_ICON" ;; gitlab.com) ui_icon hosts.gitlab "$HOST_ICON" ;;
+               bitbucket.org) ui_icon hosts.bitbucket "$HOST_ICON" ;; *) ui_icon git.repository "$HOST_ICON" ;; esac ;;
+    esac
+    icon=$REPLY; ui_git_style "$repo_role"; identity+=("${icon:+$icon }$label" "$REPLY")
+    if [[ $branch_display == 'detached '* ]]; then branch_display=${branch_display#detached }; branch_role=detached; fi
+    if [[ -z $branch_display ]]; then
+        if [[ $state == missing || $state == blocked ]]; then branch_display=unavailable; else branch_display=unborn; fi
+    fi
+    ui_icon git.branch ''; icon=$REPLY; ui_git_style "$branch_role"; identity+=(" $icon$branch_display" "$REPLY")
+}
+
+ui_report_start() {
+    printf '\n'
+    [[ -n ${REPORT_CONTEXT:-} ]] || return 0
+    local REMOTE_ARG='' REMOTE='' URL='' HOST='' OWNER='' PROTOCOL='' OWNED=false HOST_ICON='' SAFE_URL=''
+    local label=${REPORT_CONTEXT##*/}
+    local -a spans=()
+    (( ! FULL_PATHS )) || label=$REPORT_CONTEXT
+    if select_remote "$REPORT_CONTEXT"; then parse_url "$URL"; fi
+    repo_branch "$REPORT_CONTEXT"
+    ui_repo_identity spans root "$label" "$REPLY" clean
+    ui_spans 0 "${spans[@]}"
 }
 
 ui_tree_symbols() {
@@ -380,12 +418,12 @@ ui_spans() {
     ui_indent "$indent"; printf '%s' "$REPLY"
     ((continuation < UI_COLUMNS-2)) || continuation=$((UI_COLUMNS-2))
     ui_indent "$continuation"; prefix=$REPLY
-    if [[ -n ${UI_WRAP_GUTTER:-} ]]; then
+    if [[ -n ${UI_WRAP_GUTTER:-}${UI_WRAP_EDGE:-} ]]; then
         local edge=${UI_WRAP_EDGE:-} edge_style=${UI_WRAP_EDGE_COLOR:-}
         continuation=$((${#UI_WRAP_GUTTER}+${#edge}))
         prefix="$TREE_COLOR$UI_WRAP_GUTTER${TREE_COLOR:+$RESET}$edge_style$edge${edge_style:+$RESET}"
     fi
-    if [[ ! -t 1 && ${DOTS_MENU_CAPTURE:-} != 1 && -z ${UI_WRAP_GUTTER:-} ]]; then
+    if [[ ! -t 1 && ${DOTS_MENU_CAPTURE:-} != 1 && -z ${UI_WRAP_GUTTER:-}${UI_WRAP_EDGE:-} ]]; then
         while (($# >= 2)); do
             display "$1"; printf '%s%s%s' "$2" "$REPLY" "${2:+$RESET}"; shift 2
         done

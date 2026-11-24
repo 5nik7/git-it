@@ -4,9 +4,24 @@
 # shellcheck source=lib/progress.bash
 source "${BASH_SOURCE[0]%/*}/progress.bash"
 
+# Human sections receive raw label/value pairs. The legacy stream keeps its
+# existing alignment; the selected terminal view measures and escapes each field.
+operation_fields() {
+    local section=$1 detail
+    shift
+    if ((OP_BOXES)); then ui_tree_box '  ' "$@"; return; fi
+    while (($#)); do
+        case $section in
+            settings) ui_field "$1" "$2" ;;
+            publish) printf -v detail '%-7s  %s' "$1" "$2"; ui_detail "$detail" ;;
+            *) ui_detail "$2" ;;
+        esac
+        shift 2
+    done
+}
+
 event() {
-    local dir=$1 state=$2 reason=$3 shown=$1 detail
-    # Optional display lines replace the human reason, never the JSON detail.
+    local dir=$1 state=$2 reason=$3 shown=$1 label
     shift 3
     EVENT_DIRS+=("$dir"); EVENT_STATES+=("$state"); EVENT_REASONS+=("$reason")
     [[ $state != blocked && $state != failed ]] || RESULT=1
@@ -20,14 +35,16 @@ event() {
         # Selected paths are grouped once the complete preview is available.
         [[ $state != selected ]] || return 0
         if [[ $state == planned && $LAST_EVENT_DIR == "$dir" ]]; then
-            ui_detail "$reason"
+            operation_fields detail Note "$reason"
         else
             ui_status "$state" "$shown"
             # Preview uncertainty and actionable details are never hidden.
             if ((VERBOSE)) || [[ $OP_PHASE == preview || $state != @(updated|published|unchanged) ]]; then
-                if (($#)); then
-                    for detail in "$@"; do ui_detail "$detail"; done
-                else ui_detail "$reason"; fi
+                if (($#)); then operation_fields publish "$@"
+                else
+                    case $state in planned) label=Plan ;; blocked|failed|skipped) label=Reason ;; pending) label='Next step' ;; *) label=Detail ;; esac
+                    operation_fields detail "$label" "$reason"
+                fi
             fi
         fi
         LAST_EVENT_DIR=$dir
@@ -39,14 +56,18 @@ operations_heading() {
     ui_prepare
     UI_GIT_VIEW=${STATUS_VIEW:-$UI_GIT_VIEW}
     [[ $UI_GIT_VIEW != verbose ]] || VERBOSE=1
+    if ui_report_active; then OP_BOXES=1; ui_tree_symbols; ui_report_start; fi
     ui_heading "${CMD^}"
-    ui_field Root "$ROOT"
+    local mode
+    local -a settings=(Root "$ROOT")
     if [[ $CMD == sync ]]; then
-        if ((ADVANCE)); then ui_field Mode 'Configured submodule branches'
-        else ui_field Mode 'Pinned submodules'; fi
-    elif ((ALL)); then ui_field Mode 'Tracked and untracked changes'
-    else ui_field Mode 'Staged changes'; fi
-    if ((DRY_RUN)); then ui_field Preview 'Local only; no network or writes'; fi
+        if ((ADVANCE)); then mode='Configured submodule branches'
+        else mode='Pinned submodules'; fi
+    elif ((ALL)); then mode='Tracked and untracked changes'
+    else mode='Staged changes'; fi
+    settings+=(Mode "$mode")
+    if ((DRY_RUN)); then settings+=(Preview 'Local only; no network or writes'); fi
+    operation_fields settings "${settings[@]}"
     printf '\n'
     if [[ $CMD == publish ]]; then ui_heading Preview; fi
 }
@@ -411,7 +432,7 @@ publish_preview() {
         PREVIEW_REMOTE[$dir]=$UP_REMOTE; PREVIEW_BRANCH[$dir]=$BRANCH
         ((PUBLISH_CANDIDATES+=1))
         event "$dir" planned "branch $BRANCH: publish to $dest; message: $MESSAGE" \
-            "Branch   $BRANCH" "Push to  $SAFE_URL" "Target   $UP_REF" "Message  $MESSAGE"
+            Branch "$BRANCH" 'Push to' "$SAFE_URL" Target "$UP_REF" Message "$MESSAGE"
         [[ -z $parent ]] || EXPECTED[$parent]=1
     else
         event "$dir" unchanged 'no selected changes or known ahead commits (remote state not fetched)'
@@ -545,7 +566,7 @@ operations_main() {
     EVENT_DIRS=(); EVENT_STATES=(); EVENT_REASONS=(); LOCKS=(); PUB_DIRS=(); RESULT=0; PUBLISH_CANDIDATES=0
     CANCELLED=0 LAST_EVENT_DIR='' OP_PHASE=execution
     PROGRESS_PID='' PROGRESS_FD=''
-    local progress_completed=0 progress_total=0
+    local progress_completed=0 progress_total=0 OP_BOXES=0
     if ((DRY_RUN)) || [[ $CMD == publish ]]; then OP_PHASE=preview; fi
     declare -gA HELD=() VISITED=() BLOCKED=() SNAPSHOTS=() PARENT=() EXPECTED=()
     declare -gA PREVIEW_DEST=() PREVIEW_REF=() PREVIEW_REMOTE=() PREVIEW_BRANCH=()
@@ -650,16 +671,22 @@ operations_report() {
         done
         printf ']}\n'
     else
+        local title=Complete style=$GREEN
+        local -a details=()
         if ((CANCELLED)); then
-            ui_summary Cancelled "$YELLOW" 'Nothing committed or pushed.'
-            if ((RESULT)); then ui_detail 'Preflight blockers remain; resolve them before publishing.'; fi
+            title=Cancelled; style=$YELLOW
+            details+=(Result 'Nothing committed or pushed.')
+            if ((RESULT)); then details+=('Next step' 'Preflight blockers remain; resolve them before publishing.'); fi
         elif ((RESULT)); then
-            if ((DRY_RUN)); then ui_summary 'Preview incomplete' "$RED" 'Resolve blockers and rerun; no changes were made.'
-            else ui_summary Incomplete "$RED" 'Completed work is retained; resolve blockers and rerun.'; fi
-        elif ((DRY_RUN)); then ui_summary 'Preview complete' "$CYAN"
+            style=$RED
+            if ((DRY_RUN)); then title='Preview incomplete'; details+=('Next step' 'Resolve blockers and rerun; no changes were made.')
+            else title=Incomplete; details+=('Next step' 'Completed work is retained; resolve blockers and rerun.'); fi
+        elif ((DRY_RUN)); then title='Preview complete'; style=$CYAN
         elif [[ $CMD == publish && $PUBLISH_CANDIDATES == 0 ]]; then
-            ui_summary Complete "$GREEN" 'No selected changes or known ahead commits; remote state was not fetched.'
-        else ui_summary Complete "$GREEN"; fi
-        if ((DRY_RUN)); then ui_detail 'Remote state and undiscovered descendants were not checked.'; fi
+            details+=(Result 'No selected changes or known ahead commits; remote state was not fetched.')
+        fi
+        if ((DRY_RUN)); then details+=(Note 'Remote state and undiscovered descendants were not checked.'); fi
+        ui_summary "$title" "$style"
+        if ((${#details[@]})); then operation_fields detail "${details[@]}"; fi
     fi
 }

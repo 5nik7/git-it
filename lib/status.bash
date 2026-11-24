@@ -50,8 +50,7 @@ status_tracking() {
     local dir=$1
     branch='' tracking='' ahead=null behind=null
     [[ ! ${unavailable[$dir]+set} ]] || return 0
-    if text_cmd git -C "$dir" symbolic-ref --quiet --short HEAD 2>/dev/null; then branch=$REPLY
-    elif text_cmd git -C "$dir" rev-parse --verify --short HEAD 2>/dev/null; then branch="detached $REPLY"; fi
+    repo_branch "$dir"; branch=$REPLY
     if text_cmd git -C "$dir" rev-parse --symbolic-full-name '@{upstream}' 2>/dev/null; then
         tracking=$REPLY
         if text_cmd git -C "$dir" rev-list --left-right --count "HEAD...$tracking" 2>/dev/null; then
@@ -114,37 +113,26 @@ status_gutter() {
         done
         if [[ ${last_child[$parent]:-} == "$dir" ]]; then row_prefix="$column$TREE_END "; detail_prefix="$column  "
         else row_prefix="$column$TREE_FORK "; detail_prefix="$column$TREE_BAR "; fi
-    elif [[ $dir == "${WIKI_ROOT:-}" ]]; then detail_prefix='  '
-    else detail_prefix=$TREE_BAR; fi
+    elif [[ ${last_child[$dir]+set} ]]; then detail_prefix=$TREE_BAR; fi
     ui_columns
     local limit=$((UI_COLUMNS/3))
     if ((${#row_prefix}>limit)); then row_prefix="... ${row_prefix: -limit+4}"; detail_prefix="... ${detail_prefix: -limit+4}"; fi
 }
 
 status_tree_row() {
-    local dir=$1 label=${1##*/} branch_role=branch repo_role=repo kind=${REPORT_KIND:-root}
+    local dir=$1 label=${1##*/} kind=${REPORT_KIND:-root}
     local REMOTE='' URL='' HOST='' OWNER='' PROTOCOL='' OWNED=false HOST_ICON='' SAFE_URL='' icon head
-    local bar=$detail_prefix branch_display=$branch
+    local bar=$detail_prefix body=${detail_prefix:+"$detail_prefix "}
     local -a spans=() fields=()
     if [[ -n ${status_parent[$dir]:-} ]]; then kind=submodule; fi
     if [[ $dir == "${WIKI_ROOT:-}" || ${WIKI_ONLY:-0} == 1 && $dir == "$ROOT" ]]; then kind=wiki; fi
     if ((FULL_PATHS)); then label=$dir
     elif [[ ${name_counts[$label]:-0} -gt 1 && $dir == "$ROOT/"* ]]; then label=${dir#"$ROOT/"}; fi
     if [[ ! ${unavailable[$dir]+set} ]] && select_remote "$dir"; then
-        parse_url "$URL"; [[ $OWNED != true ]] || repo_role=repo_owned
+        parse_url "$URL"
     fi
-    case $kind in
-        wiki) ui_icon git.wiki '󱔘' ;;
-        submodule) if [[ $HOST == github.com ]]; then ui_icon git.submodule_github ''; else ui_icon git.submodule ''; fi ;;
-        *) case $HOST in github.com) ui_icon hosts.github "$HOST_ICON" ;; gitlab.com) ui_icon hosts.gitlab "$HOST_ICON" ;;
-               bitbucket.org) ui_icon hosts.bitbucket "$HOST_ICON" ;; *) ui_icon git.repository "$HOST_ICON" ;; esac ;;
-    esac
-    icon=$REPLY; ui_git_style "$repo_role"; spans+=("$row_prefix" "$TREE_COLOR" "${icon:+$icon }$label" "$REPLY")
-    if [[ $branch_display == 'detached '* ]]; then branch_display=${branch_display#detached }; branch_role=detached; fi
-    if [[ -z $branch_display ]]; then
-        if [[ $state == missing || $state == blocked ]]; then branch_display=unavailable; else branch_display=unborn; fi
-    fi
-    ui_icon git.branch ''; icon=$REPLY; ui_git_style "$branch_role"; spans+=(" $icon$branch_display" "$REPLY")
+    spans+=("$row_prefix" "$TREE_COLOR")
+    ui_repo_identity spans "$kind" "$label" "$branch" "$state"
     if [[ $ahead != null && $ahead != 0 ]]; then
         ui_icon git.ahead '󱦲'; icon=$REPLY; ui_git_style ahead; spans+=(" ${icon:-ahead }$ahead" "$REPLY")
     fi
@@ -154,14 +142,21 @@ status_tree_row() {
         spans+=("${icon:-behind }$behind" "$REPLY")
     fi
     if [[ $state == @(missing|blocked|conflict) || $view == verbose ]]; then ui_git_style "$state"; spans+=("  $state" "$REPLY"); fi
-    local UI_WRAP_GUTTER="$bar "
+    # ui_spans and status_files inherit these presentation settings.
+    # shellcheck disable=SC2034
+    local UI_WRAP_GUTTER=$body
     ui_spans 0 "${spans[@]}"
-    if [[ ${pointer_changed[$dir]:-} ]]; then ui_spans 0 "$bar " "$TREE_COLOR" 'Pointer  ' "$YELLOW" 'differs from parent index' ''; fi
-    if [[ -n ${reasons[$dir]:-} ]]; then ui_spans 0 "$bar " "$TREE_COLOR" 'Reason  ' "$YELLOW" "${reasons[$dir]}" ''; fi
+    if ((report)); then
+        if [[ ${pointer_changed[$dir]:-} ]]; then fields+=(Pointer 'differs from parent index'); fi
+        if [[ -n ${reasons[$dir]:-} ]]; then fields+=(Reason "${reasons[$dir]}"); fi
+    else
+        if [[ ${pointer_changed[$dir]:-} ]]; then ui_spans 0 "$body" "$TREE_COLOR" 'Pointer  ' "$YELLOW" 'differs from parent index' ''; fi
+        if [[ -n ${reasons[$dir]:-} ]]; then ui_spans 0 "$body" "$TREE_COLOR" 'Reason  ' "$YELLOW" "${reasons[$dir]}" ''; fi
+    fi
     if [[ $state != @(missing|blocked) && ( $view == verbose || $view != short && $dir == "$ROOT" ) ]]; then
         ui_path "$dir"
         if [[ -z $HOST || $PROTOCOL == file ]]; then OWNER=''; fi
-        fields=(Host "$HOST" Protocol "${URL:+$PROTOCOL}" Remote "$REMOTE" Upstream "${tracking#refs/remotes/}" Owner "$OWNER" Root "$REPLY")
+        fields+=(Host "$HOST" Protocol "${URL:+$PROTOCOL}" Remote "$REMOTE" Upstream "${tracking#refs/remotes/}" Owner "$OWNER" Root "$REPLY")
         if [[ $view == verbose ]]; then
             head=unborn; if text_cmd git -C "$dir" rev-parse --verify HEAD 2>/dev/null; then head=$REPLY; fi
             fields+=(HEAD "$head" URL "$SAFE_URL" Tracking "${tracking:-unavailable}")
@@ -170,9 +165,10 @@ status_tree_row() {
             ui_path "${F[parent]:-none}"; fields+=(Parent "$REPLY")
             ui_path "${F[outermost]}"; fields+=(Outermost "$REPLY")
         fi
-        ui_tree_box "$bar" "${fields[@]}"
     fi
-    local TREE_GUTTER="$bar " TREE_FILES=1
+    if ((${#fields[@]})); then ui_tree_box "$bar" "${fields[@]}"; fi
+    # shellcheck disable=SC2034
+    local TREE_GUTTER=$body TREE_FILES=1
     status_files "$dir"
 }
 
@@ -223,11 +219,15 @@ status_main() {
     local -A unavailable=() skip_submodules=() reasons=()
     local -A recorded=() pointer_changed=() status_parent=() status_depth=() last_child=() name_counts=() states=() starts=() sizes=()
     local -a visible=() file_paths=() file_codes=() file_oldpaths=()
-    local dir branch tracking ahead behind state view total inspected=0 changed=0 incomplete=0 tree=0
+    local dir branch tracking ahead behind state view total inspected=0 changed=0 incomplete=0 tree=0 report=0
     local parent idx count row_prefix detail_prefix
     local -x GIT_NO_LAZY_FETCH=1
     if ((OUTERMOST)); then ancestry; ROOT=${CHAIN[0]}; fi
-    if ((!JSON)); then ui_prepare; if ui_tree_active; then tree=1; ui_tree_symbols; fi; fi
+    if ((!JSON)); then
+        ui_prepare
+        if ui_tree_active; then tree=1; ui_tree_symbols; fi
+        if ui_report_active; then report=1; fi
+    fi
     view=${STATUS_VIEW:-${UI_GIT_VIEW:-default}}
     trap 'progress_stop' EXIT
     trap 'exit 130' INT
@@ -258,13 +258,30 @@ status_main() {
         visible+=("$dir"); states[$dir]=$state
         starts[$dir]=${#file_paths[@]}; sizes[$dir]=${#paths[@]}
         file_paths+=("${paths[@]}"); file_codes+=("${codes[@]}"); file_oldpaths+=("${oldpaths[@]}")
-        parent=${status_parent[$dir]:-}; [[ ! $parent ]] || last_child[$parent]=$dir
+        if ((tree && !report)); then
+            parent=${status_parent[$dir]:-}; [[ ! $parent ]] || last_child[$parent]=$dir
+        fi
         name_counts[${dir##*/}]=$((${name_counts[${dir##*/}]:-0}+1))
     done
     if ((JSON)); then printf '{"schema":1,"remote_state":"cached","repositories":['
     elif ((!tree)) && [[ $CMD != overview || $changed != 0 ]]; then
         [[ $CMD != overview ]] || printf '\n'
         ui_heading 'Git status'
+    fi
+    if ((report)); then
+        # Project the registered edges onto the rows that survived the filters.
+        # The Wiki keeps its own heading and continues the source's outer guide.
+        for dir in "${visible[@]}"; do
+            parent=${status_parent[$dir]:-}
+            while [[ -n $parent && ! ${states[$parent]+set} ]]; do parent=${status_parent[$parent]:-}; done
+            if [[ $dir == "${WIKI_ROOT:-}" && $dir != "$ROOT" ]]; then
+                last_child[$ROOT]=$dir
+            else
+                parent=${parent:-${REPORT_CONTEXT:-}}
+                if [[ $parent && $parent != "$dir" ]]; then status_parent[$dir]=$parent; last_child[$parent]=$dir; fi
+            fi
+        done
+        ui_report_start
     fi
     for idx in "${!visible[@]}"; do
         dir=${visible[idx]}; state=${states[$dir]}
@@ -276,7 +293,13 @@ status_main() {
             status_json_row "$dir"
         elif ((tree)); then
             status_gutter "$dir"
-            if ((idx)); then printf '%s\n' "$TREE_COLOR${row_prefix%??}$TREE_BAR${TREE_COLOR:+$RESET}"; fi
+            if ((!report)); then
+                if ((idx)); then printf '%s\n' "$TREE_COLOR${row_prefix%??}$TREE_BAR${TREE_COLOR:+$RESET}"; fi
+            elif [[ $idx == 0 && -n ${REPORT_CONTEXT:-} ||
+                  $idx == 1 && ${visible[0]} == "$ROOT" && -z ${REPORT_CONTEXT:-} ||
+                  $idx != 0 && $dir == "${WIKI_ROOT:-}" ]]; then
+                printf '%s\n' "$TREE_COLOR$TREE_BAR${TREE_COLOR:+$RESET}"
+            fi
             status_tree_row "$dir"
         else status_human_row "$dir"; fi
     done
@@ -286,8 +309,14 @@ status_main() {
         ui_line "$total repositories / $changed changed or unavailable / $((total - changed)) clean" '' 2
         ui_line 'Remote state uses local tracking refs; no fetch performed.' '' 2
     elif [[ $tree == 1 && ( $view == verbose || ${#visible[@]} == 0 ) ]]; then
-        ui_line "${#visible[@]} repositories / $changed changed or unavailable" '' 0
-        if [[ $view == verbose ]]; then ui_line 'Remote state uses local tracking refs; no fetch performed.' '' 0; fi
+        if ((report)); then
+            local -a summary=(Repositories "${#visible[@]} shown / $changed changed or unavailable")
+            if [[ $view == verbose ]]; then summary+=('Remote state' 'Local tracking refs; no fetch performed.'); fi
+            ui_tree_box '' "${summary[@]}"
+        else
+            ui_line "${#visible[@]} repositories / $changed changed or unavailable" '' 0
+            if [[ $view == verbose ]]; then ui_line 'Remote state uses local tracking refs; no fetch performed.' '' 0; fi
+        fi
     fi
     return "$incomplete"
 }

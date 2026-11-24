@@ -5,6 +5,12 @@ repo_root() {
     text_cmd canonical_dir "$REPLY"
 }
 
+repo_branch() {
+    if text_cmd git -C "$1" symbolic-ref --quiet --short HEAD 2>/dev/null; then return 0
+    elif text_cmd git -C "$1" rev-parse --verify --short HEAD 2>/dev/null; then REPLY="detached $REPLY"
+    else REPLY=''; fi
+}
+
 list_fields() {
     printf '%s\n' root remote url https_url protocol host owner repo owned icon current parent outermost \
         parent_dirname parent_basename submodule_prefix submodule_basename cwd_prefix \
